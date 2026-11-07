@@ -1,0 +1,21 @@
+<Project Sdk="Godot.NET.Sdk/4.3.0">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CgPort.Godot</RootNamespace>
+    <AssemblyName>CgPortClient</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- 服务端/工具/旧版代码不编进客户端程序集，只通过项目引用使用 -->
+    <Compile Remove="server/**" />
+    <Compile Remove="legacy_gdscript/**" />
+    <Compile Remove="testdata/**" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="server/src/CgPort.Core/CgPort.Core.csproj" />
+    <ProjectReference Include="server/src/CgPort.Server/CgPort.Server.csproj" />
+    <ProjectReference Include="server/src/CgPort.Client/CgPort.Client.csproj" />
+  </ItemGroup>
+</Project>

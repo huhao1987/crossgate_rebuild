@@ -1,0 +1,15 @@
+{
+  "server_dir": "_server",
+  "sets": [
+    {"name": "TEST", "graphic": "bin/Graphic_test.bin", "graphic_info": "bin/GraphicInfo_test.bin",
+     "anime": "bin/Anime_test.bin", "anime_info": "bin/AnimeInfo_test.bin", "anime_header": 12}
+  ],
+  "palette": "bin/pal/palet_00.cgp",
+  "start_map": 1,
+  "start": [20, 20],
+  "player_anime": 900000,
+  "act_stand": 0, "act_walk": 1, "act_attack": 2, "act_hurt": 3, "act_dead": 4, "dir_offset": 0,
+  "encounter_scale": 0.5,
+  "zoom": 1.0,
+  "load_save": false
+}

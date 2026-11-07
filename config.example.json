@@ -1,0 +1,79 @@
+{
+  "_说明": "复制为 config.json（放在工程根目录，或 Godot 的 user:// 目录）。game_root 是游戏目录；server_dir 是其中的服务端目录名；sets 照 cgmsv.yml 的 BinLoader 分组填写，后面的组覆盖前面的。",
+  "game_root": "/Users/hao/Downloads/cg_single",
+  "server_dir": "_精简佣兵服务端",
+  "sets": [
+    {
+      "name": "BASE",
+      "graphic": "bin/Graphic_66.bin",
+      "graphic_info": "bin/GraphicInfo_66.bin",
+      "anime": "bin/Anime_4.bin",
+      "anime_info": "bin/AnimeInfo_4.bin",
+      "anime_header": 12
+    },
+    {
+      "name": "EX",
+      "graphic": "bin/GraphicEx_5.bin",
+      "graphic_info": "bin/GraphicInfoEx_5.bin",
+      "anime": "bin/AnimeEx_1.Bin",
+      "anime_info": "bin/AnimeInfoEx_1.Bin",
+      "anime_header": 12
+    },
+    {
+      "name": "V3",
+      "graphic": "bin/GraphicV3_19.bin",
+      "graphic_info": "bin/GraphicInfoV3_19.bin",
+      "anime": "bin/AnimeV3_8.bin",
+      "anime_info": "bin/AnimeInfoV3_8.bin",
+      "anime_header": 20
+    },
+    {
+      "name": "PUK1",
+      "graphic": "bin/Puk1/Graphic_PUK1_1.bin",
+      "graphic_info": "bin/Puk1/GraphicInfo_PUK1_1.bin",
+      "anime": "bin/Puk1/Anime_PUK1_1.bin",
+      "anime_info": "bin/Puk1/AnimeInfo_PUK1_1.Bin",
+      "anime_header": 20
+    },
+    {
+      "name": "PUK2",
+      "graphic": "bin/Puk2/Graphic_PUK2_2.bin",
+      "graphic_info": "bin/Puk2/GraphicInfo_PUK2_2.bin",
+      "anime": "bin/Puk2/Anime_PUK2_4.bin",
+      "anime_info": "bin/Puk2/AnimeInfo_PUK2_4.bin",
+      "anime_header": 20
+    },
+    {
+      "name": "PUK3",
+      "graphic": "bin/Puk3/Graphic_PUK3_1.bin",
+      "graphic_info": "bin/Puk3/GraphicInfo_PUK3_1.bin",
+      "anime": "bin/Puk3/Anime_PUK3_2.bin",
+      "anime_info": "bin/Puk3/AnimeInfo_PUK3_2.bin",
+      "anime_header": 20
+    },
+    {
+      "name": "JOY",
+      "graphic": "bin/Graphic_Joy_125.bin",
+      "graphic_info": "bin/GraphicInfo_Joy_125.bin",
+      "anime": "bin/Anime_Joy_91.bin",
+      "anime_info": "bin/AnimeInfo_Joy_91.bin",
+      "anime_header": 20
+    }
+  ],
+  "palette": "bin/pal/palet_00.cgp",
+  "start_map": 1000,
+  "start": [
+    50,
+    50
+  ],
+  "player_anime": 100000,
+  "act_stand": 0,
+  "act_walk": 1,
+  "act_attack": 2,
+  "act_hurt": 3,
+  "act_dead": 5,
+  "dir_offset": 0,
+  "encounter_scale": 0.5,
+  "encounters": true,
+  "zoom": 1.0
+}

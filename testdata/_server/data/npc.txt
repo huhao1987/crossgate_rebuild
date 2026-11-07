@@ -1,0 +1,2 @@
+Guide			1					1	18	20									2	900000				guide.txt
+Sign			2					1	22	20									0	200				

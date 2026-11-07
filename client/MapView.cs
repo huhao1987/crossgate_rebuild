@@ -1,0 +1,172 @@
+﻿using CgPort.Core;
+using Godot;
+
+namespace CgPort.Godot;
+
+/// <summary>
+/// 地图显示：地面只画可见范围；物件、NPC、角色放进 y 排序层。
+/// 通行网格用与服务端相同的规则在客户端本地计算（只用于寻路提示，最终以服务端校验为准）。
+/// </summary>
+public partial class MapView : Node2D
+{
+    [Signal] public delegate void TileClickedEventHandler(Vector2I cell);
+    /// <summary>按住不放（手指或鼠标）时每隔一会儿发一次：手指下面那一格。官方 PC 版按住鼠标人物会一直朝鼠标走。</summary>
+    [Signal] public delegate void TileHeldEventHandler(Vector2I cell);
+    private bool _held; private Vector2 _heldPos; private double _heldT;
+
+    public MapData Map = null!;
+    public Walkability Walk = null!;
+    public TextureCache Cache = null!;
+    public Node2D Entities = null!;
+    public int MissingTiles => _ground?.Missing ?? 0;
+    private GroundLayer _ground = null!;
+    private Rect2I _lastView;
+    private int _lastVersion;
+
+    /// <summary>调色板换了：物件精灵引用的是旧纹理，全部释放后按需重建。</summary>
+    private void RespawnAllChunks()
+    {
+        foreach (var l in _liveChunks.Values) foreach (var n in l) n.QueueFree();
+        _liveChunks.Clear();
+    }
+    // 物件按 16×16 格分区块：只生成镜头附近的区块，远离后释放（最大的地图有 800×800 格）
+    private const int Chunk = 16;
+    private Node2D _floorObjects = null!;
+    /// <summary>调试：物件按 GraphicInfo 标志上色（45 红、1 绿）。环境变量 CG_DEBUG_FLAGS=1。</summary>
+    public static bool DebugFlags = System.Environment.GetEnvironmentVariable("CG_DEBUG_FLAGS") == "1";
+    private readonly Dictionary<Vector2I, List<(int X, int Y, int MapId)>> _chunkObjects = new();
+    private readonly Dictionary<Vector2I, List<Node2D>> _liveChunks = new();
+    public int LiveObjectCount => _liveChunks.Values.Sum(l => l.Count);
+    public int TotalObjectCount => _chunkObjects.Values.Sum(l => l.Count);
+
+    public void Build(MapData map, Walkability walk, TextureCache cache)
+    {
+        Map = map; Walk = walk; Cache = cache;
+        _ground = new GroundLayer { View = this };
+        AddChild(_ground);
+        // 台阶类物件（GraphicInfo 标志 = 45，实测法兰城/召唤之间里的台阶全是 45）贴着地面画，永远在人物下面，
+        // 否则大台阶按锚点排序会把站在上面的人盖住。标志 1（路灯、小草、传送标记）和 0 照常和人物一起排序。
+        _floorObjects = new Node2D { YSortEnabled = true };
+        AddChild(_floorObjects);
+        Entities = new Node2D { YSortEnabled = true };
+        AddChild(Entities);
+        for (int y = 0; y < map.Height; y++)
+            for (int x = 0; x < map.Width; x++)
+            {
+                int mid = map.Objects[map.Index(x, y)];
+                if (mid == 0) continue;
+                var key = new Vector2I(x / Chunk, y / Chunk);
+                if (!_chunkObjects.TryGetValue(key, out var l)) _chunkObjects[key] = l = new();
+                l.Add((x, y, mid));
+            }
+    }
+
+    private void SpawnChunk(Vector2I key)
+    {
+        var nodes = new List<Node2D>();
+        if (_chunkObjects.TryGetValue(key, out var list))
+            foreach (var (x, y, mid) in list)
+            {
+                var (tex, e) = Cache.ByMapId(mid);
+                if (tex == null || e == null) continue;
+                // 锚点就是占位区最靠前的格子（物件从锚点往东、往北占格），直接用它排序
+                var sp = new Sprite2D { Texture = tex, Centered = false, Position = Iso.ToScreen(x, y), Offset = new Vector2(e.OffsetX, e.OffsetY) };
+                if (DebugFlags) sp.Modulate = e.Flag == 45 ? new Color(1, 0.3f, 0.3f) : e.Flag == 1 ? new Color(0.3f, 1, 0.3f) : Colors.White;
+                (e.Flag == 45 ? _floorObjects : Entities).AddChild(sp);
+                nodes.Add(sp);
+            }
+        _liveChunks[key] = nodes;
+    }
+
+    /// <summary>保证可见格子范围（再往外扩一圈区块，大物件可能伸进画面）内的区块已生成，释放远处的。</summary>
+    private void UpdateChunks(Rect2I cells)
+    {
+        int cx0 = Math.Max(0, cells.Position.X / Chunk - 1), cy0 = Math.Max(0, cells.Position.Y / Chunk - 1);
+        int cx1 = Math.Min((Map.Width - 1) / Chunk, cells.End.X / Chunk + 1), cy1 = Math.Min((Map.Height - 1) / Chunk, cells.End.Y / Chunk + 1);
+        var want = new HashSet<Vector2I>();
+        for (int cy = cy0; cy <= cy1; cy++) for (int cx = cx0; cx <= cx1; cx++) want.Add(new Vector2I(cx, cy));
+        foreach (var k in want) if (!_liveChunks.ContainsKey(k)) SpawnChunk(k);
+        foreach (var k in _liveChunks.Keys.ToList())
+        {
+            // 留一圈缓冲，避免来回走动时反复生成
+            if (k.X >= cx0 - 1 && k.X <= cx1 + 1 && k.Y >= cy0 - 1 && k.Y <= cy1 + 1) continue;
+            foreach (var n in _liveChunks[k]) n.QueueFree();
+            _liveChunks.Remove(k);
+        }
+    }
+
+    public override void _Process(double delta)
+    {
+        ProcessHeld(delta);
+        var cam = GetViewport().GetCamera2D();
+        if (cam == null || Map == null) return;
+        var size = GetViewportRect().Size / cam.Zoom;
+        var r = new Rect2(cam.GetScreenCenterPosition() - size / 2, size);
+        var cs = new[] { Iso.ToCell(r.Position), Iso.ToCell(r.Position + new Vector2(r.Size.X, 0)), Iso.ToCell(r.Position + new Vector2(0, r.Size.Y)), Iso.ToCell(r.End) };
+        var mn = new Vector2I(cs.Min(c => c.X), cs.Min(c => c.Y)) - new Vector2I(2, 2);
+        var mx = new Vector2I(cs.Max(c => c.X), cs.Max(c => c.Y)) + new Vector2I(3, 3);
+        var view = new Rect2I(mn, mx - mn);
+        if (view != _lastView || Cache.Version != _lastVersion)
+        {
+            if (Cache.Version != _lastVersion) RespawnAllChunks();
+            _lastView = view; _lastVersion = Cache.Version; _ground.Visible = view; _ground.QueueRedraw(); UpdateChunks(view);
+        }
+    }
+
+    public override void _UnhandledInput(InputEvent e)
+    {
+        // 触摸会被 Godot 转成鼠标事件（emulate_mouse_from_touch，默认开启），所以这里只处理鼠标左键，避免一次点按触发两次
+        Vector2? pos = e switch
+        {
+            InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb => mb.Position,
+            _ => null,
+        };
+        if (pos is Vector2 p)
+        {
+            _held = true; _heldPos = p; _heldT = 0;
+            EmitSignal(SignalName.TileClicked, CellAt(p));
+        }
+    }
+
+    private Vector2I CellAt(Vector2 p) => Iso.ToCell(GetCanvasTransform().AffineInverse() * p - GlobalPosition);
+
+    /// <summary>松开（在哪儿松开都算）结束"按住走"；按住时跟踪手指位置。</summary>
+    public override void _Input(InputEvent e)
+    {
+        if (e is InputEventMouseButton { Pressed: false, ButtonIndex: MouseButton.Left }) _held = false;
+        else if (e is InputEventMouseMotion mm && _held) _heldPos = mm.Position;
+    }
+
+    private void ProcessHeld(double delta)
+    {
+        if (!_held) return;
+        if (!Input.IsMouseButtonPressed(MouseButton.Left)) { _held = false; return; }
+        if ((_heldT += delta) < 0.25) return;
+        _heldT = 0;
+        EmitSignal(SignalName.TileHeld, CellAt(_heldPos));
+    }
+
+    private partial class GroundLayer : Node2D
+    {
+        public MapView View = null!;
+        public new Rect2I Visible;
+        public int Missing;
+
+        public override void _Draw()
+        {
+            var m = View.Map;
+            int x0 = Math.Clamp(Visible.Position.X, 0, m.Width), y0 = Math.Clamp(Visible.Position.Y, 0, m.Height);
+            int x1 = Math.Clamp(Visible.End.X, 0, m.Width), y1 = Math.Clamp(Visible.End.Y, 0, m.Height);
+            Missing = 0;
+            for (int y = y0; y < y1; y++)
+                for (int x = x0; x < x1; x++)
+                {
+                    int mid = m.Ground[m.Index(x, y)];
+                    if (mid == 0) continue;
+                    var (tex, e) = View.Cache.ByMapId(mid);
+                    if (tex == null || e == null) { Missing++; continue; }
+                    DrawTexture(tex, Iso.ToScreen(x, y) + new Vector2(e.OffsetX, e.OffsetY));
+                }
+        }
+    }
+}

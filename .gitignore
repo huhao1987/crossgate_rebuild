@@ -1,0 +1,12 @@
+# Godot / .NET 生成物
+.godot/
+.mono/
+bin/
+obj/
+build/
+*.apk
+# 本地配置、测试输出
+config.json
+test/out_*
+*_trace*.txt
+net_trace.txt

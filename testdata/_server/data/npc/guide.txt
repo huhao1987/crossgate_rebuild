@@ -1,0 +1,10 @@
+block EndEvent 1 == 1
+endwindow "Safe travels!"
+
+block
+window "Hello, traveler.",next
+window "Take this crystal?",yes,no
+window_no
+window_yes
+giveitem 7002
+endevent 1 = 1
