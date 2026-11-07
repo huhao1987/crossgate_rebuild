@@ -376,6 +376,14 @@ public partial class Main : Node2D
         AddChild(_items);
         _hudSkin.MenuPressed += i =>
         {
+            // 左边的窗口（状态/技能/宠物/名片/图鉴/系统）都在左上角同一个位置，右边的（地图/物品）都贴右上：
+            // 打开一个就把同一边的其它窗口关掉，不叠在一起（手机上叠着根本看不清）
+            bool right = i is 0 or 3;
+            var leftWins = new CanvasLayer?[] { _status, _skills, _pets, _petDetail, _cardBook, _mailEdit, _mailRecord, _album, _system };
+            var rightWins = new CanvasLayer?[] { _mapWin, _items, _gold };
+            var mine = i switch { 0 => _mapWin, 1 => _status, 2 => _skills, 3 => (CanvasLayer)_items, 4 => _pets, 5 => _cardBook, 6 => _album, 7 => _system, _ => null };
+            foreach (var w in right ? rightWins : leftWins) if (w != null && w != mine && !(i == 4 && w == _petDetail)) w.Visible = false;
+            if (!right) _prod?.CloseAll();
             switch (i)
             {
                 case 0: _mapWin.Toggle(); break;

@@ -271,6 +271,12 @@ public partial class ChatInput : CanvasLayer
         var root = new Control { AnchorTop = 1, AnchorBottom = 1, OffsetTop = -720, OffsetBottom = 0, OffsetRight = 960, MouseFilter = Control.MouseFilterEnum.Ignore };
         AddChild(root);
         _edit = new LineEdit { Position = new Vector2(6, 674), Size = new Vector2(620, 20), Flat = true, CaretBlink = false, ContextMenuEnabled = false, MaxLength = 120 };
+        if (ShowButton)
+        {
+            // 手机：输入行不接触摸、获得焦点也不自己弹键盘，只有点「聊天」按钮才弹（以前点底部菜单会误弹键盘）
+            _edit.MouseFilter = Control.MouseFilterEnum.Ignore;
+            _edit.VirtualKeyboardEnabled = false;
+        }
         var clear = new Color(0, 0, 0, 0);
         _edit.AddThemeColorOverride("font_color", clear); _edit.AddThemeColorOverride("caret_color", clear);
         _edit.AddThemeColorOverride("selection_color", clear); _edit.AddThemeColorOverride("font_selected_color", clear);
@@ -292,10 +298,14 @@ public partial class ChatInput : CanvasLayer
         if (ShowButton)
         {
             // 手机模式：输入行右边一个看得见的「聊天」按钮，点了弹出手机键盘（官方是直接用键盘打字，手机上没有键盘）
-            var btn = new Button { Text = "聊天", Position = new Vector2(632, 668), Size = new Vector2(64, 30), FocusMode = Control.FocusModeEnum.None };
+            // 放在画面右下角（底栏上面），离左下的底部菜单远远的
+            var btn = new Button { Text = "聊天", FocusMode = Control.FocusModeEnum.None,
+                AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1, OffsetLeft = -84, OffsetRight = -8, OffsetTop = -66, OffsetBottom = -30 };
             btn.AddThemeFontSizeOverride("font_size", 16);
             btn.Pressed += () => { if (_edit.HasFocus()) Submit(); else Start(); };
-            root.AddChild(btn);
+            var full = new Control { AnchorRight = 1, AnchorBottom = 1, MouseFilter = Control.MouseFilterEnum.Ignore };
+            AddChild(full);
+            full.AddChild(btn);
             _button = btn;
         }
     }
@@ -329,8 +339,8 @@ public partial class ChatInput : CanvasLayer
     public override void _Input(InputEvent e)
     {
         if (e is InputEventKey { Pressed: true, Keycode: Key.Escape } && _edit.HasFocus()) { _edit.Clear(); _edit.ReleaseFocus(); Redraw(); GetViewport().SetInputAsHandled(); }
-        // 手机：点输入行（画面左下、底栏上面那一行）→ 弹键盘。触摸坐标是窗口像素，先换成画布坐标再比
-        if (e is InputEventScreenTouch { Pressed: true } t && !_edit.HasFocus())
+        // 点输入行弹键盘：只在原版模式（手机模式只用「聊天」按钮，输入行紧贴底部菜单，手指一点就误触）
+        if (!ShowButton && e is InputEventScreenTouch { Pressed: true } t && !_edit.HasFocus())
         {
             var p = GetViewport().GetScreenTransform().AffineInverse() * t.Position;
             var line = new Rect2(_root.GlobalPosition + new Vector2(0, 664), new Vector2(626, 32));

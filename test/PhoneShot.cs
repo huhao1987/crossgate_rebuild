@@ -26,17 +26,22 @@ public partial class PhoneShot : SceneTree
         _f++;
         if (_mode == "setup") { if (_f == 30) { Root.GetTexture().GetImage().SavePng("/tmp/phone_setup.png"); return true; } return false; }
         if (_f == 400) Root.GetTexture().GetImage().SavePng("/tmp/phone_game.png");
-        if (_f == 410)
+        // 模拟手指（ScreenTouch，跟真手机一样由引擎转成鼠标）依次点底部菜单 8 项（画布 1200×540，每项 80 宽，y 516–540；点在偏上的 520，最容易误触的位置）
+        if (_f >= 410 && _f < 410 + 8 * 20 && (_f - 410) % 20 == 0)
         {
-            // 模拟手指点底部菜单「系统」（画布 1200×540，第 8 格 x 560–640，y 516–540）
-            var vp = Root.GetViewport();
-            var pos = vp.GetScreenTransform() * new Vector2(600, 530);
-            foreach (var pressed in new[] { true, false })
-                Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = pressed, Position = pos, GlobalPosition = pos, Device = (int)InputEvent.DeviceIdEmulation });
+            int k = (_f - 410) / 20;
+            var pos = Root.GetViewport().GetScreenTransform() * new Vector2(80 * k + 40, 518);
+            Input.ParseInputEvent(new InputEventScreenTouch { Index = 0, Pressed = true, Position = pos });
+            Input.ParseInputEvent(new InputEventScreenTouch { Index = 0, Pressed = false, Position = pos });
         }
-        if (_f == 420) { var h = Root.GetViewport().GuiGetHoveredControl(); for (Node? n = h; n != null; n = n.GetParent()) GD.Print("HOVER " + n.GetType().Name + " " + (n is Control c ? c.GetGlobalRect() + " " + c.MouseFilter : n is CanvasLayer l ? "layer " + l.Layer : "")); }
-        if (_f == 430) GD.Print((_m!.ChatIn.Typing ? "FAIL" : "PASS") + " 点底部菜单不会弹聊天；" + (_m.SystemWin.Visible ? "PASS" : "FAIL") + " 系统窗口打开了");
-        if (_f == 440) { Root.GetTexture().GetImage().SavePng("/tmp/phone_sys.png"); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
+        if (_f >= 410 && _f < 410 + 8 * 20 && (_f - 410) % 20 == 10)
+        {
+            int k = (_f - 410) / 20;
+            GD.Print($"{(_m!.ChatIn.Typing ? "FAIL" : "PASS")} 点菜单第 {k + 1} 项：不弹聊天");
+            if (k == 7) GD.Print((_m.SystemWin.Visible ? "PASS" : "FAIL") + " 点「系统」打开了系统窗口");
+        }
+        if (_f == 575) Root.GetTexture().GetImage().SavePng("/tmp/phone_sys.png");
+        if (_f == 580) { File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
         return false;
     }
 }
