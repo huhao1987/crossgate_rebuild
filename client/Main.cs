@@ -222,7 +222,7 @@ public partial class Main : Node2D
         AddChild(ui);
         _hud.Position = new Vector2(8, 8);
         ui.AddChild(_hud);
-        _hudSkin = new Hud { Cache = _cache };
+        _hudSkin = new Hud { Cache = _cache, PinMenu = _cfg.MobileUi };
         AddChild(_hudSkin);
         // 右上按钮（官方提示）：22581 对战 Ctrl+J、22583 观战 Ctrl+K、22585 组队 Ctrl+L、22587 交换名片、22589 交易
         _hudSkin.ButtonPressed += id =>
@@ -359,7 +359,7 @@ public partial class Main : Node2D
             {
                 case 0: _system.Visible = false; (_session as NetworkSession)?.Logout(); AddChild(new SetupScreen { Layer = 50 }); break;
                 case 1: _chat.MaxLines = _chat.MaxLines >= 6 ? 2 : _chat.MaxLines + 2; _toast.Show($"聊天显示 {_chat.MaxLines} 行", 2); break;
-                case 6: _system.Visible = false; AddChild(new SetupScreen { Layer = 50 }); break;   // 高级设定：界面模式、显示帧数、服务器（官方这一项的内容还没做）
+                case 6: _system.Visible = false; AddChild(new SetupScreen { Layer = 50, FromGame = true }); break;   // 高级设定：界面模式、显示帧数、服务器（官方这一项的内容还没做）
                 default: _toast.Show("这项设定还没做", 2); break;
             }
         };

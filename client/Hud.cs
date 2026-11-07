@@ -27,6 +27,7 @@ public partial class Hud : CanvasLayer
     public bool FlagLit(int i) => _lit[i]?.Visible == true;
     public void TestClickFlag(int i) => FlagClicked?.Invoke(FlagBits[i]);
     public void TestPressButton(int id) => ButtonPressed?.Invoke(id);
+    public void TestMenu(int i) => MenuPressed?.Invoke(i);
     public void SetFlags(int flags) { Flags = flags; for (int i = 0; i < 5; i++) if (_lit[i] != null) _lit[i]!.Visible = (flags & FlagBits[i]) != 0; }
     private TextureRect? _menu; private GreenBox? _menuBox; private double _menuHold;
     public bool Ok { get; private set; }
@@ -128,11 +129,14 @@ public partial class Hud : CanvasLayer
         float h = vp.GetVisibleRect().Size.Y;
         bool hover = DisplayServer.GetName() != "headless" && !OS.HasFeature("mobile") && vp.GetMousePosition().Y >= h - 24;
         if (_menuHold > 0) _menuHold -= delta;
-        _menu.Visible = Ok && (hover || _menuHold > 0) && !_battle;
+        _menu.Visible = Ok && (hover || _menuHold > 0 || PinMenu) && !_battle;
     }
     private bool _battle;
     /// <summary>测试用：让菜单出现几秒（等同手机上点底栏）。</summary>
     public void ShowMenu(double seconds = 5) => _menuHold = seconds;
+    /// <summary>手机模式：底部菜单一直显示（官方要鼠标移到最下面才出来，手机没有悬停）。</summary>
+    public bool PinMenu;
+    public bool MenuShown => _menu?.Visible ?? false;
 
     private static void AnchorRight(TextureRect c, float offsetFromRight, float y)
     {

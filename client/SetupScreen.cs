@@ -21,8 +21,21 @@ public partial class SetupScreen : CanvasLayer
     private LineEdit _host = null!, _port = null!, _acct = null!, _pwd = null!;
     private Control _netRow = null!;
 
+    private Vector2I _oldScale; private Window.ContentScaleStretchEnum _oldStretch;
+    /// <summary>从游戏里打开（系统 → 高级设定）时为 true：多一个「返回游戏」，关掉时恢复游戏的画面缩放。</summary>
+    public bool FromGame;
+
     public override void _Ready()
     {
+        // 手机上设置界面单独放大：画布高 400（1080 高的屏幕约 2.7 倍），字和按钮够大，手指点得到
+        var root = GetTree().Root;
+        _oldScale = root.ContentScaleSize; _oldStretch = root.ContentScaleStretch;
+        var ws = DisplayServer.WindowGetSize();
+        if (OS.GetName() == "Android" || ws.Y >= 900)
+        {
+            root.ContentScaleSize = new Vector2I(Math.Max(1, ws.X * 400 / Math.Max(1, ws.Y)), 400);
+            root.ContentScaleStretch = Window.ContentScaleStretchEnum.Fractional;
+        }
         var bg = new ColorRect { Color = new Color(0.12f, 0.12f, 0.14f), AnchorRight = 1, AnchorBottom = 1 };
         AddChild(bg);
         // 手机模式画布只有 540 高，内容放不下时可以上下滑
@@ -31,16 +44,17 @@ public partial class SetupScreen : CanvasLayer
         var box = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         box.AddThemeConstantOverride("separation", 14);
         scroll.AddChild(box);
-        var title = new Label { Text = "CG Port · 设置（游戏中按 F10 回到这里）" };
+        var title = new Label { Text = "CG Port · 设置（游戏里：底部「系统」→「高级设定」回到这里）" };
         title.AddThemeFontSizeOverride("font_size", 30);
         box.AddChild(title);
         box.AddChild(new Label { Text = "选择游戏目录（包含 bin/ 和服务端目录的那一层），或放着数据包 crossgate.cgpak 的目录（手机推荐：只拷一个文件）。程序只读取，不会修改。", AutowrapMode = TextServer.AutowrapMode.WordSmart });
 
-        var row = new HBoxContainer();
+        var row = new HFlowContainer();
         _path = new LineEdit { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill, CustomMinimumSize = new Vector2(0, 52),
             Text = OS.GetName() == "Android" ? "/storage/emulated/0/CrossGate" : System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile) + "/Downloads/cg_single" };
         row.AddChild(_path);
         var browse = new Button { Text = "浏览…", CustomMinimumSize = new Vector2(120, 52) };
+        _path.CustomMinimumSize = new Vector2(500, 52);
         browse.Pressed += Browse;
         row.AddChild(browse);
         box.AddChild(row);
@@ -48,7 +62,7 @@ public partial class SetupScreen : CanvasLayer
         // 单机 / 联网
         _online = new CheckButton { Text = "联网模式（连接原版服务端 cgmsv）" };
         box.AddChild(_online);
-        var net = new HBoxContainer(); net.AddThemeConstantOverride("separation", 8);
+        var net = new HFlowContainer(); net.AddThemeConstantOverride("separation", 8);
         LineEdit Field(string ph, string text, float w, bool secret = false)
         {
             var e = new LineEdit { PlaceholderText = ph, Text = text, CustomMinimumSize = new Vector2(w, 48), Secret = secret };
@@ -66,7 +80,7 @@ public partial class SetupScreen : CanvasLayer
         box.AddChild(net);
 
         // 界面：自动（手机用手机模式）/ 手机模式（界面放大）/ 原版（和官方 960×720 一样）；显示帧数
-        var look = new HBoxContainer(); look.AddThemeConstantOverride("separation", 12);
+        var look = new HFlowContainer(); look.AddThemeConstantOverride("separation", 12);
         look.AddChild(new Label { Text = "界面" });
         _ui = new OptionButton { CustomMinimumSize = new Vector2(220, 48) };
         _ui.AddItem("自动（手机用手机模式）"); _ui.AddItem("手机模式（界面放大）"); _ui.AddItem("原版（和电脑版一样）");
@@ -76,7 +90,7 @@ public partial class SetupScreen : CanvasLayer
         look.AddChild(_fps);
         box.AddChild(look);
         // 音乐 / 音效音量（0 = 关）
-        var snd = new HBoxContainer(); snd.AddThemeConstantOverride("separation", 12);
+        var snd = new HFlowContainer(); snd.AddThemeConstantOverride("separation", 12);
         snd.AddChild(new Label { Text = "音乐" });
         _bgmVol = new HSlider { MinValue = 0, MaxValue = 100, Step = 5, Value = old?.BgmVolume ?? 80, CustomMinimumSize = new Vector2(200, 40) };
         snd.AddChild(_bgmVol);
@@ -88,7 +102,7 @@ public partial class SetupScreen : CanvasLayer
         box.AddChild(snd);
         box.AddChild(new Label { Text = "联网时游戏规则在服务端；本机目录只用来读图档。服务端在 Mac 上就填 127.0.0.1，手机连 Mac 就填 Mac 的局域网 IP（start_server 窗口里会显示）。账号不存在会自动建角色。", AutowrapMode = TextServer.AutowrapMode.WordSmart, Modulate = new Color(1, 1, 1, 0.7f) });
 
-        var btns = new HBoxContainer();
+        var btns = new HFlowContainer();
         btns.AddThemeConstantOverride("separation", 12);
         if (OS.GetName() == "Android")
         {
@@ -105,6 +119,12 @@ public partial class SetupScreen : CanvasLayer
         var demo = new Button { Text = "用测试素材试玩", CustomMinimumSize = new Vector2(200, 56) };
         demo.Pressed += () => { Write("{ \"game_root\": \"testdata\" }"); Restart(); };
         btns.AddChild(demo);
+        if (FromGame)
+        {
+            var back = new Button { Text = "返回游戏", CustomMinimumSize = new Vector2(160, 56) };
+            back.Pressed += () => { root.ContentScaleSize = _oldScale; root.ContentScaleStretch = _oldStretch; QueueFree(); };
+            btns.AddChild(back);
+        }
         box.AddChild(btns);
 
         _status = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, SizeFlagsVertical = Control.SizeFlags.ExpandFill };
