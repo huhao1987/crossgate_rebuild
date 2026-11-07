@@ -26,7 +26,16 @@ public partial class PhoneShot : SceneTree
         _f++;
         if (_mode == "setup") { if (_f == 30) { Root.GetTexture().GetImage().SavePng("/tmp/phone_setup.png"); return true; } return false; }
         if (_f == 400) Root.GetTexture().GetImage().SavePng("/tmp/phone_game.png");
-        if (_f == 410) _m!.HudSkin.TestMenu(7);
+        if (_f == 410)
+        {
+            // 模拟手指点底部菜单「系统」（画布 1200×540，第 8 格 x 560–640，y 516–540）
+            var vp = Root.GetViewport();
+            var pos = vp.GetScreenTransform() * new Vector2(600, 530);
+            foreach (var pressed in new[] { true, false })
+                Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = pressed, Position = pos, GlobalPosition = pos, Device = (int)InputEvent.DeviceIdEmulation });
+        }
+        if (_f == 420) { var h = Root.GetViewport().GuiGetHoveredControl(); for (Node? n = h; n != null; n = n.GetParent()) GD.Print("HOVER " + n.GetType().Name + " " + (n is Control c ? c.GetGlobalRect() + " " + c.MouseFilter : n is CanvasLayer l ? "layer " + l.Layer : "")); }
+        if (_f == 430) GD.Print((_m!.ChatIn.Typing ? "FAIL" : "PASS") + " 点底部菜单不会弹聊天；" + (_m.SystemWin.Visible ? "PASS" : "FAIL") + " 系统窗口打开了");
         if (_f == 440) { Root.GetTexture().GetImage().SavePng("/tmp/phone_sys.png"); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
         return false;
     }

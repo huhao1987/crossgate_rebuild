@@ -78,11 +78,12 @@ public partial class Hud : CanvasLayer
                 if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb) { MenuPressed?.Invoke(Mathf.Clamp((int)(mb.Position.X / 80), 0, 7)); _menuHold = 0; }
             };
             _menu.MouseExited += () => _menuBox.Visible = false;
-            root.AddChild(_menu);
-            // 手机：点底栏（菜单没出来时）→ 出现 5 秒
+            // 手机：点底栏（菜单没出来时）→ 出现 5 秒。这一层要放在菜单下面，
+            // 以前放在上面，把菜单的点击全挡住了（手机实测：点菜单没反应，触屏辅助又把点按挪到「聊天」按钮上）
             var tapZone = new Control { AnchorTop = 1, AnchorBottom = 1, AnchorRight = 1, OffsetTop = -24, MouseFilter = Control.MouseFilterEnum.Pass };
-            tapZone.GuiInput += e => { if (e is InputEventScreenTouch { Pressed: true }) _menuHold = 5; };
+            tapZone.GuiInput += e => { if (e is InputEventScreenTouch { Pressed: true } || e is InputEventMouseButton { Pressed: true }) _menuHold = 5; };
             root.AddChild(tapZone);
+            root.AddChild(_menu);
         }
         // 面板左边的圆盘是时间显示（官方是按时间画的天空渐变），图档来源还没找到，暂时留空
         panel.Position = Vector2.Zero; root.AddChild(panel); _top.Add(panel);
