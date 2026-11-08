@@ -74,7 +74,11 @@ public partial class StatusPanel : CgWindow
 {
     public Func<PlayerState> Player = () => new PlayerState();
     public Action<int>? AddPoint;
+    public Func<NetworkSession?> Session = () => null;
+    public Action<string, Action>? Ask;   // 确认框（删除称号）
     private int _tab;   // 0 状态 1 明细 2 称号
+    private int _titlePage, _titleSel = -1;
+    private LineEdit? _freeEdit;
 
     public override void _Ready()
     {
@@ -93,7 +97,7 @@ public partial class StatusPanel : CgWindow
         if (!Visible) return;
         Clear();
         var p = Player(); var s = p.Stats;
-        Img(_tab switch { 1 => 22515, 2 => 22525, _ => 22501 }, 0, 0, block: true);
+        Img(_tab switch { 1 => 22515, 2 => 22980, _ => 22501 }, 0, 0, block: true);   // 称号页是 22980（官方实测；22525 不是）
         Btn(22509, 22510, 247, 7, () => Visible = false);
         // 标签：窗口底部三格（状态 / 明细 / 称号）
         for (int i = 0; i < 3; i++) { int k = i; Hit(6 + i * 89, 408, 84, 24, _ => { _tab = k; Refresh(); }, box: false); }
@@ -102,6 +106,7 @@ public partial class StatusPanel : CgWindow
         if (_tab == 0)
         {
             Txt(p.Job, 197, 57, center: true);
+            if (Session() is { } ns0) { Txt(ns0.SpecialTitle, 197, 80, center: true); Txt(ns0.FreeTitle, 197, 103, center: true); }   // 特殊稱號 / 玩家稱號
             Txt(p.Level.ToString(), 85, 126, right: true);
             Txt(p.Exp.ToString(), 125, 150, right: true);
             Txt(s.NextExp.ToString(), 125, 172, right: true);
@@ -142,8 +147,55 @@ public partial class StatusPanel : CgWindow
             int[] m = { s.Critical, s.Counter, s.Hit, s.Dodge };
             for (int i = 0; i < 4; i++) Txt($"{m[i]:+0;-0;+0}", 222, 302 + 23 * i, right: true);
         }
-        else Txt("（称号：还没做）", 136, 120, center: true);
+        else TitlePage();
+        if (_tab != 2 && _freeEdit != null) { _freeEdit.QueueFree(); _freeEdit = null; }
     }
+
+    /// <summary>
+    /// 称号页（官方 bob 实测）：背景 22980。玩家稱號：输入框 + 設定 22981 (198,57) → ACwB；
+    /// 特別稱號：8 行（x 40 宽 189，行顶 131+30i），点一行 = 选为特殊称号（zGp 序号，青色框）；◀ 22881 (126,99) ▶ 22883 (225,99) 翻页；
+    /// 刪除 22985 (35,379) → tj 序号；解除 22983 (160,379) → zGp -1。
+    /// </summary>
+    private void TitlePage()
+    {
+        var ns = Session();
+        var titles = ns?.Titles ?? Array.Empty<string>();
+        int pages = Math.Max(1, (titles.Count + 7) / 8);
+        _titlePage = Math.Clamp(_titlePage, 0, pages - 1);
+        if (_freeEdit == null)
+        {
+            _freeEdit = new LineEdit { Position = new Vector2(8, 61), Size = new Vector2(186, 20), Flat = true, MaxLength = 16, Text = ns?.FreeTitle ?? "" };
+            _freeEdit.AddThemeStyleboxOverride("normal", new StyleBoxEmpty()); _freeEdit.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
+            _freeEdit.AddThemeFontSizeOverride("font_size", 12);
+            Win.AddChild(_freeEdit);
+        }
+        Btn(22981, 22982, 198, 57, () => { if (_freeEdit != null) ns?.SetFreeTitle(_freeEdit.Text.Trim()); });
+        Btn(22881, 22882, 126, 99, () => { _titlePage = (_titlePage + pages - 1) % pages; Refresh(); });
+        Btn(22883, 22884, 225, 99, () => { _titlePage = (_titlePage + 1) % pages; Refresh(); });
+        Txt($"{_titlePage + 1}/ {pages}", 190, 110, center: true);
+        for (int k = 0; k < 8; k++)
+        {
+            int i = _titlePage * 8 + k; if (i >= titles.Count) break;
+            float y = 131 + 30 * k;
+            bool on = i == (_titleSel >= 0 ? _titleSel : ns?.TitleIndex ?? -1);
+            if (on) Body.AddChild(new CyanBox { Position = new Vector2(40, y), Size = new Vector2(189, 22) });
+            Txt(titles[i], 42, y + 11);
+            int idx = i;
+            Hit(40, y, 189, 22, _ => { _titleSel = idx; ns?.SelectTitle(idx); Refresh(); }, box: false);
+        }
+        Btn(22985, 22986, 35, 379, () =>
+        {
+            int sel = _titleSel >= 0 ? _titleSel : ns?.TitleIndex ?? -1;
+            if (ns == null || sel < 0 || sel >= titles.Count) return;
+            void Del() { ns.DeleteTitle(sel); _titleSel = -1; }
+            if (Ask != null) Ask($"确实要删除称号「{titles[sel]}」吗？", Del); else Del();
+        });
+        Btn(22983, 22984, 160, 379, () => { _titleSel = -1; ns?.SelectTitle(-1); Refresh(); });
+    }
+
+    public void TestTitle(int i) { _titleSel = i; Session()?.SelectTitle(i); Refresh(); }
+    public void TestClearTitle() { _titleSel = -1; Session()?.SelectTitle(-1); Refresh(); }
+    public void TestFreeTitle(string t) { if (_freeEdit != null) _freeEdit.Text = t; Session()?.SetFreeTitle(t); }
 }
 
 /// <summary>
@@ -400,9 +452,9 @@ public partial class SkillPanel : CgWindow
             Img(22760, 0, 0, block: true);
             Btn(22509, 22510, 246, 6, () => Visible = false);
             Txt(k.Name, 90, 42, center: true);
-            Txt(k.Level.ToString(), 220, 42);
+            Txt($"{k.Level}/{k.MaxLevel,2}", 220, 42);   // 官方"1/ 0"：后面是这个职业能练到的最高等级
             Txt(k.Exp.ToString(), 66, 66);
-            Txt(k.NextExp.ToString(), 240, 66, right: true);
+            Txt(k.Level >= k.MaxLevel ? "--" : k.NextExp.ToString(), 240, 66, right: true);   // 练到顶（或职业用不了）显示 --
             for (int i = 0; i < k.Techs.Count && i < 10; i++)
             {
                 var t = k.Techs[i]; float y = 80 + 22 * i;
@@ -561,5 +613,12 @@ public partial class SortButton : Control
         DrawRect(r, new Color(0.35f, 0.35f, 0.38f));
         DrawRect(r.Grow(-2), _down ? new Color(0.62f, 0.5f, 0.3f) : _hover ? new Color(0.82f, 0.68f, 0.44f) : new Color(0.75f, 0.6f, 0.38f));
     }
+}
+
+/// <summary>称号列表里选中那一行的青色框（官方 2px）。</summary>
+public partial class CyanBox : Control
+{
+    public override void _Ready() => MouseFilter = MouseFilterEnum.Ignore;
+    public override void _Draw() => DrawRect(new Rect2(Vector2.One, Size - Vector2.One * 2), new Color(0, 1, 1), false, 2);
 }
 

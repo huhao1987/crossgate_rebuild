@@ -20,6 +20,8 @@ public static class WindowText
         int h = header ?? 0;
         if (header == null && type == 2 && lines.Count > 0 && int.TryParse(lines[0].Trim(), out var n)) { h = Math.Max(0, n - 1); lines.RemoveAt(0); }
         while (lines.Count > h + 1 && string.IsNullOrWhiteSpace(lines[^1])) lines.RemoveAt(lines.Count - 1);   // 末尾空行官方不占高度
+        // 表头和第一个选项之间的空行不算选项（官方实测：剑士公会会长"…你有什么事?\n\n我想就职"，点"我想就职"发 1）
+        if (type == 2) while (h < lines.Count - 1 && string.IsNullOrWhiteSpace(lines[h])) h++;
         var buttons = ButtonNames(mask);
         return type == 2
             ? new DialogPage(string.Join("\n", lines.Take(h)), buttons, false, lines.Skip(h).ToList())

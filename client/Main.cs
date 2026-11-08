@@ -46,6 +46,8 @@ public partial class Main : Node2D
     private GameAudio? _audio;
     public GameAudio? Audio => _audio;
     private BankWindow _bank = null!;
+    private SkillShopWindow _skillShop = null!;
+    public SkillShopWindow SkillShopUi => _skillShop;
     private ProductionUi _prod = null!;
     public ProductionUi ProdUi => _prod;
     private GoldWindow _gold = null!;
@@ -275,6 +277,9 @@ public partial class Main : Node2D
             _prod.Opened = () => { if (_skills != null) _skills.Visible = false; };
             nsP.BattleStarted += _ => _prod.CloseAll();
         }
+        _skillShop = new SkillShopWindow { Cache = _cache, Session = () => _session as NetworkSession };
+        AddChild(_skillShop);
+        if (_session is NetworkSession nsS) nsS.SkillShopChanged += () => _skillShop.Refresh();
         _bank = new BankWindow { Cache = _cache, Session = () => _session as NetworkSession };
         AddChild(_bank);
         if (_session is NetworkSession nsB)
@@ -345,7 +350,7 @@ public partial class Main : Node2D
         };
         AddChild(_petDetail);
         _pets.OpenDetail = slot => { _pets.Visible = false; _petDetail.Open(slot); };
-        _status = new StatusPanel { Cache = _cache, Player = () => _session.Player, AddPoint = k => (_session as NetworkSession)?.AddStatPoint(k) };
+        _status = new StatusPanel { Cache = _cache, Player = () => _session.Player, AddPoint = k => (_session as NetworkSession)?.AddStatPoint(k), Session = () => _session as NetworkSession, Ask = (t, yes) => _confirm?.Ask(t, yes) };
         AddChild(_status);
         _mapWin = new MapPanel { Cache = _cache, Where = () => (_view?.Map, _session.X, _session.Y), MapName0 = () => _session.CurrentMap?.Name ?? "" };
         AddChild(_mapWin);

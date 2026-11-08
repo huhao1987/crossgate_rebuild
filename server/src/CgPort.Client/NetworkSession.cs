@@ -364,6 +364,13 @@ public sealed class NetworkSession : IGameSession
             case "kg":    // LVUP：可分配点数（62 进制，实测 登录 "h" = 17，加一点后 "g" = 16）
                 Player.StatPoints = D62Safe(rest.Trim()); StatusChanged?.Invoke();
                 break;
+            case "Sc":    // TITLE：称号列表，每个 3 段：名字|?|?（实测 "见习剑士|2|111|呢喃的歌声|1|7|"）
+            {
+                var tp = rest.Split('|'); var list = new List<string>();
+                for (int i = 0; i + 2 < tp.Length; i += 3) if (tp[i].Length > 0) list.Add(Unesc(tp[i]));
+                Titles = list; StatusChanged?.Invoke();
+                break;
+            }
             case "jv":    // CJ：职业名（"1 游民"）
                 { var j = rest.Trim(); int sp2 = j.IndexOf(' '); Player.Job = Unesc(sp2 >= 0 ? j[(sp2 + 1)..] : j); StatusChanged?.Invoke(); }
                 break;
@@ -630,6 +637,48 @@ public sealed class NetworkSession : IGameSession
         ProduceDone?.Invoke(r);
     }
 
+    // ———————————————————— 称号（官方 bob 实测）————————————————————
+    // 状态窗口「稱號」页：点一行 = zGp 序号（ST，选为特殊称号）；解除 = zGp -1；删除 = tj 序号（DT）；
+    // 玩家称号输入框 + 設定 = ACwB 文字（FT）。服务端回 aPc（第 28 项选中序号、第 30 项玩家称号）和 Sc。
+    public IReadOnlyList<string> Titles { get; private set; } = Array.Empty<string>();
+    public int TitleIndex { get; private set; } = -1;
+    public string FreeTitle { get; private set; } = "";
+    public string SpecialTitle => TitleIndex >= 0 && TitleIndex < Titles.Count ? Titles[TitleIndex] : "";
+    public void SelectTitle(int i) => Send("zGp", i.ToString());
+    public void DeleteTitle(int i) => Send("tj", i.ToString());
+    public void SetFreeTitle(string text) => Send("ACwB", text.Replace("\\", "\\\\").Replace(" ", "\\S"));
+
+    // ———————————————————— 技能导师（官方客户端 bob 实测 2026-11-09）————————————————————
+    // 右键对着导师 → BZ 16 入口（DialogPage kind skillmenu）→ 想学习 xD 0 1 → BZ 17 "头像|名|话|技能名|说明|栏位|费用|"
+    //   → 学习 xD 0 1 → 服务端 BZ 0 结果（"这个技能已经学过了"/"技能栏位不足"/学会）；不学 = 关窗口。
+    // 想忘记 xD 0 2 → BZ 18 "头像|名|话|(名字|等级|栏位)×n|" → 点一行 xD 0 序号(1 起) → BZ 0 是/否确认 → 是 → cNE 清掉那一栏 + "失去了…的技能"。
+    public sealed record SkillShopPage(int Type, int Face, string Npc, string Text, string SkillName, string Desc, int Slots, int Cost,
+        IReadOnlyList<(string Name, int Level, int Slots)> Known);
+    public SkillShopPage? SkillShop { get; private set; }
+    public event Action? SkillShopChanged;
+
+    private void OnSkillShop(int type, string[] q)
+    {
+        string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n") .Trim('\n') : "";
+        int N(int i) => i < q.Length && int.TryParse(q[i], out var v) ? v : 0;
+        var known = new List<(string, int, int)>();
+        if (type == 18) for (int i = 3; i + 2 < q.Length; i += 3) if (q[i].Length > 0) known.Add((T(i), N(i + 1), N(i + 2)));
+        SkillShop = type == 17
+            ? new SkillShopPage(17, N(0), T(1), T(2), T(3), T(4), N(5), N(6), known)
+            : new SkillShopPage(18, N(0), T(1), T(2), "", "", 0, 0, known);
+        DialogChanged?.Invoke(null);
+        SkillShopChanged?.Invoke();
+    }
+
+    /// <summary>学习（type 17）：sel 1。忘记（type 18）：sel = 第几个（1 起）。</summary>
+    public void SkillShopChoose(int sel)
+    {
+        if (_window == null || SkillShop == null) return;
+        var w = _window; _window = null; SkillShop = null; SkillShopChanged?.Invoke();
+        Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, "0", sel.ToString());
+    }
+    public void SkillShopClose() { _window = null; SkillShop = null; SkillShopChanged?.Invoke(); }
+
     // ———————————————————— 银行 ————————————————————
 
     /// <summary>保险箱里的一件道具（每页 20 格）：图像|数量|?|名字|?|说明。</summary>
@@ -871,6 +920,8 @@ public sealed class NetworkSession : IGameSession
         st.Vit = I(5, st.Vit); st.Str = I(6, st.Str); st.Tgh = I(7, st.Tgh); st.Spd = I(8, st.Spd); st.Mag = I(9, st.Mag);
         st.Endurance = I(10, st.Endurance); st.Dex = I(11, st.Dex); st.Int = I(12, st.Int);
         st.NextExp = I(14, (int)st.NextExp);
+        TitleIndex = I(28, TitleIndex);                       // 选中的特殊称号（Sc 列表的序号，-1 没选；官方实测）
+        if (_cp[30] != null) FreeTitle = Unesc(_cp[30]);       // 玩家称号（自己写的）
         st.Attack = I(16, st.Attack); st.Defense = I(17, st.Defense); st.Agility = I(18, st.Agility);
         st.Spirit = I(19, st.Spirit); st.Recovery = I(20, st.Recovery); st.Charm = I(21, st.Charm);
         for (int e = 0; e < 4; e++) st.Element[e] = I(23 + e, st.Element[e]);
@@ -1207,7 +1258,7 @@ public sealed class NetworkSession : IGameSession
             if (name.Length == 0) { if (old != null) Player.Skills.Remove(old); continue; }
             var sk = old ?? new SkillInfo { Slot = slot };
             sk.SkillId = Int(a, i + 1); sk.Name = name; sk.Level = Int(a, i + 3); sk.Exp = Int(a, i + 4); sk.NextExp = Int(a, i + 6);
-            sk.SlotsUsed = Math.Max(1, Int(a, i + 7)); sk.Type = Int(a, i + 8);
+            sk.SlotsUsed = Math.Max(1, Int(a, i + 7)); sk.Type = Int(a, i + 8); sk.MaxLevel = Int(a, i + 5);
             if (old == null) Player.Skills.Add(sk);
         }
         Player.Skills.Sort((x, y) => x.Slot.CompareTo(y.Slot));
@@ -1401,11 +1452,22 @@ public sealed class NetworkSession : IGameSession
         int type = D62Safe(f[0]), mask = D62Safe(f[1]);   // 两个都是 62 进制：是/否窗口的按钮掩码是 "c"（= 12 = 是 4 + 否 8）
         if (type == 23) { OnBank(f); return; }   // 银行（保险箱）窗口，见 OnBank
         _window = new Window(type, mask, f[2], f[3]);
+        if (type is 17 or 18) { OnSkillShop(type, string.Join(' ', f.Skip(4)).Split('|')); return; }
         var data = string.Join(' ', f.Skip(4));
         int bar = data.IndexOf('|');
         int? header = null;
         if (bar >= 0 && int.TryParse(data[..bar].Replace("\\S", "").Trim(), out var h)) { header = h; data = data[(bar + 1)..]; }
         DialogPage page;
+        if (type == 16)
+        {
+            // 技能导师（Skillmaster）入口：头像|NPC名|话|，选项固定（官方实测）：想学习技能 / 想忘记技能 / 还是算了 → xD … 0 1/2/3
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n").Replace("\n", "\n").Trim('\n') : "";
+            page = new DialogPage(T(2), new List<string>(), false, new List<string> { "想学习技能", "想忘记技能", "还是算了" })
+            { Kind = "skillmenu", NpcName = T(1), Face = int.TryParse(q[0], out var fc) ? fc : 0 };
+            DialogChanged?.Invoke(page);
+            return;
+        }
         if (type is 5 or 6 or 7)
         {
             // 商店：头像|NPC名|话|…（全部用 | 分隔，不带"标题行数"前缀）
@@ -1449,6 +1511,7 @@ public sealed class NetworkSession : IGameSession
             // 选项序号：界面从 0 数，协议从 1 数（实测：选第一项发 1；发 0 服务端不理）。商店入口的"离开"直接关掉。
             int n = int.Parse(button[4..]) + 1;
             if (w.Type == 5 && n == 3) { DialogChanged?.Invoke(null); return; }
+            if (w.Type == 16 && n == 3) { DialogChanged?.Invoke(null); return; }   // 还是算了
             sel = n.ToString();
         }
         else if (button.StartsWith("buy:") || button.StartsWith("sell:"))

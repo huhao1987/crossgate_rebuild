@@ -175,6 +175,8 @@ public sealed class SkillInfo
     public int SlotsUsed { get; set; } = 1;
     /// <summary>技能种类（cNE 每个技能第 9 段，官方实测）：0 战斗、1 制造（铸剑/制药/料理…）、2 对道具（鉴定/修理/刻印）、3 对人（急救/治疗）、4 采集（伐木/狩猎/挖掘）。</summary>
     public int Type { get; set; }
+    /// <summary>当前职业能练到的最高等级（cNE 第 6 段，实测：游民 连击 6、制药 0；药剂师 制药 6）。0 = 这个职业用不了（没有招式）。</summary>
+    public int MaxLevel { get; set; } = 10;
     public List<TechInfo> Techs { get; set; } = new();
     /// <summary>制造类技能的配方（xmgQ）。</summary>
     public List<RecipeInfo> Recipes { get; set; } = new();
