@@ -126,6 +126,8 @@ public sealed record DialogPage(string Text, IReadOnlyList<string> Buttons, bool
     public IReadOnlyList<string>? AltTexts { get; init; }
     /// <summary>兑换（BZ 28）：拿来换的道具编号和名字（"银"）；持有数量由客户端按道具编号数背包。</summary>
     public int SourceItem { get; init; }
+    /// <summary>输入窗口（BZ 11，exe 0x424ffc 参数 1）：文字下面有一行输入框，按钮发 "按钮 转义后的文字"。</summary>
+    public bool Input { get; init; }
     public string SourceName { get; init; } = "";
 }
 

@@ -16,6 +16,8 @@ public partial class DialogPanel : CanvasLayer
     private VBoxContainer _lines = null!;
     private HBoxContainer _buttons = null!;
     private const int LineH = 19;
+    /// <summary>输入窗口的输入框（不是输入窗口时为 null）。</summary>
+    public LineEdit? InputBox { get; private set; }
 
     public override void _Ready()
     {
@@ -53,13 +55,24 @@ public partial class DialogPanel : CanvasLayer
         body.Text = text;
         int textLines = text.Length == 0 ? 0 : body.LineCount;
         int optLines = page.Options?.Count ?? 0;
-        float w = 448, h = Math.Max(240, 18 + (textLines + optLines) * LineH + 52);
+        float w = 448, h = Math.Max(240, 18 + (textLines + optLines + (page.Input ? 1 : 0)) * LineH + 52);
         _win.OffsetLeft = -w / 2; _win.OffsetRight = w / 2; _win.OffsetTop = -120 - 12; _win.OffsetBottom = h - 120 - 12;
         _win.AddChild(new Control { Size = new Vector2(w, h), MouseFilter = Control.MouseFilterEnum.Stop });   // 挡住点击，不让点到地图
         _win.AddChild(CgFrame.Tint(new Vector2(w, h)));
         if (Cache != null) _win.AddChild(new CgFrame { Cache = Cache, Size = new Vector2(w, h), MouseFilter = Control.MouseFilterEnum.Ignore, CenterAlpha = 0 });
         float y = 18;
         if (textLines > 0) { _win.AddChild(body); y += textLines * LineH; }
+        // 输入窗口（BZ 11）：文字下面一行输入框
+        InputBox = null;
+        if (page.Input)
+        {
+            InputBox = new LineEdit { Position = new Vector2(14, y), Size = new Vector2(w - 28, 20), MaxLength = 60, Flat = true };
+            InputBox.AddThemeColorOverride("font_color", Colors.White);
+            InputBox.AddThemeStyleboxOverride("normal", new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0.35f) });
+            InputBox.AddThemeStyleboxOverride("focus", new StyleBoxFlat { BgColor = new Color(0, 0, 0, 0.35f) });
+            _win.AddChild(InputBox); y += LineH + 4;
+            InputBox.CallDeferred(Control.MethodName.GrabFocus);
+        }
         for (int i = 0; i < optLines; i++)
         {
             int idx = i;

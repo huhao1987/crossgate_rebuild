@@ -533,7 +533,11 @@ public partial class Main : Node2D
         }
         _dialog = new DialogPanel { Cache = _cache };
         AddChild(_dialog);
-        _dialog.ButtonPressed += b => _session.Answer(b);
+        _dialog.ButtonPressed += b =>
+        {
+            if (_dialog.InputBox is { } ib && _session is NetworkSession nsi) nsi.AnswerWith(b, NetworkSession.WindowEscape(ib.Text));
+            else _session.Answer(b);
+        };
         // 商店买 / 卖（官方专用窗口，见 ShopTrade.cs）；「取消」官方不发包，只关窗口
         _shop = new ShopTradeWindow { Cache = _cache, StandAct = _cfg.ActStand, Gold = () => _session.Player.Gold, FreeSlots = () => 20 - _session.Player.Items.Count(i => i.Slot is >= 8 and < 28) };
         _shop.CountOf = id => _session.Player.Items.Where(i => i.ItemId == id && i.Slot is >= 8 and < 28).Sum(i => Math.Max(1, i.Count));

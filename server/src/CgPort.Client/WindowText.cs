@@ -27,6 +27,6 @@ public static class WindowText
         var buttons = ButtonNames(mask);
         return type == 2
             ? new DialogPage(string.Join("\n", lines.Take(h)), buttons, false, lines.Skip(h).ToList())
-            : new DialogPage(string.Join("\n", lines), buttons.Count > 0 ? buttons : new List<string> { "ok" }, true);
+            : new DialogPage(string.Join("\n", lines), buttons.Count > 0 ? buttons : new List<string> { "ok" }, true) { Input = type == 11 };
     }
 }
