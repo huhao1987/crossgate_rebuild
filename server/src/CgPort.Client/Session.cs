@@ -7,7 +7,9 @@ namespace CgPort.Client;
 public sealed record MapInfo(int MapId, string Name, string MapFile);
 
 /// <summary>战斗单位的显示信息（客户端只需要这些，不需要服务端内部的能力值）。</summary>
-public sealed record UnitView(int Id, int Side, int Level, int Hp, int MaxHp, int AnimeId, bool Alive, bool Escaped, string Name = "");
+/// <summary>Status：战斗单位状态旗标（C| 每单位第 10 段，16 进制）：0x20 昏睡、0x40 石化、0x80 酒醉、0x100 混乱、0x200 遗忘、0x400 中毒（CGAssistant FL_DEBUFF_*），
+/// 0x4000–0x80000 六种魔法状态（官方 exe 0x46f635 起按位挑覆盖动画）。</summary>
+public sealed record UnitView(int Id, int Side, int Level, int Hp, int MaxHp, int AnimeId, bool Alive, bool Escaped, string Name = "", int Status = 0);
 
 public sealed record BattleView(int Turn, IReadOnlyList<UnitView> Units, int PlayerUnitId);
 

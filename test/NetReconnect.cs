@@ -9,6 +9,7 @@ namespace CgPort.Godot.Tests;
 /// </summary>
 public partial class NetReconnect : SceneTree
 {
+    bool _offline;
     int _f, _st, _drops; (int, int) _pos; int _map; Main _m = null!; readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     bool End() { GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
@@ -25,7 +26,7 @@ public partial class NetReconnect : SceneTree
     {
         _f++;
         var s = _m.Session as NetworkSession; var b = _m.Battle;
-        if (s != null && _drops == 0) { _drops = -1; s.Disconnected += _ => _drops = Math.Max(1, _drops + 1); }
+        if (s != null && _drops == 0) { _drops = -1; s.Disconnected += _ => { _drops = Math.Max(1, _drops + 1); _offline |= !s.InGame; }; }
         switch (_st)
         {
             case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90:
@@ -34,7 +35,8 @@ public partial class NetReconnect : SceneTree
                 _pos = (s!.X, s.Y); _map = s.CurrentMap!.MapId;
                 s.TestDrop(); _st = 2; _f = 0; break;
             case 2 when _f == 30:
-                Check(!s!.InGame && _drops >= 1, $"掉线被发现（断线 {_drops} 次，InGame {s.InGame}）"); _st = 3; _f = 0; break;
+                // 本机服务端重连很快，30 帧时可能已经连回去了；看断线那一刻 InGame 有没有变 false
+                Check(_offline && _drops >= 1, $"掉线被发现（断线 {_drops} 次，断线时离线 {_offline}，现在 InGame {s!.InGame}）"); _st = 3; _f = 0; break;
             case 3 when s!.InGame && s.CurrentMap != null && _f > 30 || _f > 2400:
                 Check(s.InGame && s.CurrentMap?.MapId == _map && Math.Abs(s.X - _pos.Item1) <= 1 && Math.Abs(s.Y - _pos.Item2) <= 1,
                     $"自动重连回来了：第 {s.Reconnects} 次重连，地图 {s.CurrentMap?.MapId}，位置 ({s.X},{s.Y})（掉线前 {_map} {_pos}），用了 {_f / 60.0:0.0} 秒");

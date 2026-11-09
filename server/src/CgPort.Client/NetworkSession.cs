@@ -1608,7 +1608,7 @@ public sealed class NetworkSession : IGameSession
             int pos = Hex(f[i]);
             if (pos < 0 || pos > 19 || f[i].Length == 0) break;
             int hp = Hex(f[i + 5]);
-            units.Add(new UnitView(pos, pos >= 10 ? 1 : 0, Hex(f[i + 4]), hp, Hex(f[i + 6]), Hex(f[i + 2]), hp > 0, false, Unesc(f[i + 1])));
+            units.Add(new UnitView(pos, pos >= 10 ? 1 : 0, Hex(f[i + 4]), hp, Hex(f[i + 6]), Hex(f[i + 2]), hp > 0, false, Unesc(f[i + 1]), Hex(f[i + 9])));
         }
         if (units.Count == 0)
         {
@@ -2230,6 +2230,12 @@ public sealed class NetworkSession : IGameSession
                 Kind = type == 24 ? "petskill" : type == 25 ? "petpick" : "petslot", Shop = list, NpcName = T(1), Face = N(0),
                 AltTexts = type == 24 ? new[] { T(3), T(4) } : null, SourceItem = type == 25 ? N(3) : 0,
             };
+        }
+        else if (type == 29)
+        {
+            // 埋起物品（exe 0x422b16）：只有一个数 = 不能选的那格；窗口直接画背包（BuryWindow），选了发 "格子"
+            var d = string.Join(' ', f.Skip(4)).Split('|');
+            page = new DialogPage("", new List<string> { "cancel" }, false) { Kind = "bury", SourceItem = int.TryParse(d[0].Trim(), out var ex) ? ex : -1 };
         }
         else if (type == 28)
         {

@@ -44,6 +44,8 @@ public partial class BattleUi : CanvasLayer
         public Label Tag = null!;
         public Vector2 Home;
         public bool Down;
+        public int Status;
+        public AnimSprite? Ailment, Buff;
     }
     private readonly Dictionary<int, Unit> _units = new();
     private readonly List<Button> _buttons = new();
@@ -140,6 +142,36 @@ public partial class BattleUi : CanvasLayer
         s.AddChild(bar); s.AddChild(tag);
         _stage.AddChild(s);
         _units[u.Id] = new Unit { Id = u.Id, Side = u.Side, MaxHp = u.MaxHp, Hp = u.Hp, Level = u.Level, Sprite = s, Bar = bar, Tag = tag, Home = pos, Down = !u.Alive };
+        SetStatus(_units[u.Id], u.Status);
+    }
+
+    // 战斗单位身上的状态动画（官方 exe 0x46f5ef / 0x46f630：按状态旗标挑一个，一直循环播）
+    //  异常（0x49a76c）：0x10→110075、0x20 昏睡→110076、0x40 石化→110077、0x80 酒醉→110078、0x100 混乱→110079、0x200 遗忘→110080
+    //  魔法状态（0x49a78c）：0x4000→103018、0x8000→103019、0x10000→103020、0x20000→103021、0x40000→103022、0x80000→103023
+    private static readonly (int Bit, int Anime)[] AilmentFx = { (0x10, 110075), (0x20, 110076), (0x40, 110077), (0x80, 110078), (0x100, 110079), (0x200, 110080) };
+    private static readonly (int Bit, int Anime)[] BuffFx = { (0x4000, 103018), (0x8000, 103019), (0x10000, 103020), (0x20000, 103021), (0x40000, 103022), (0x80000, 103023) };
+    public int StatusOverlays => _units.Values.Count(u => u.Ailment != null) + _units.Values.Count(u => u.Buff != null);
+
+    private void SetStatus(Unit u, int status)
+    {
+        u.Status = status;
+        int want = u.Down ? 0 : AilmentFx.FirstOrDefault(x => (status & x.Bit) != 0).Anime;
+        u.Ailment = Overlay(u, u.Ailment, want);
+        want = u.Down ? 0 : BuffFx.FirstOrDefault(x => (status & x.Bit) != 0).Anime;
+        u.Buff = Overlay(u, u.Buff, want);
+    }
+
+    private AnimSprite? Overlay(Unit u, AnimSprite? cur, int anime)
+    {
+        if (cur != null && IsInstanceValid(cur) && cur.AnimeId == anime) return cur;
+        if (cur != null && IsInstanceValid(cur)) cur.QueueFree();
+        if (anime == 0) return null;
+        var acts = Cache.Library.AnimeActions(anime);
+        if (acts.Count == 0) return null;
+        var k = acts.Keys.OrderBy(x => x.Act).ThenBy(x => x.Dir).First();
+        var fx = new AnimSprite { Cache = Cache, AnimeId = anime, Dir = k.Dir, Act = k.Act, FallbackAct = k.Act, ZIndex = 1 };
+        u.Sprite.AddChild(fx);
+        return fx;
     }
 
     private void UpdateStatus(int turn)
@@ -758,6 +790,7 @@ public partial class BattleUi : CanvasLayer
             {
                 x.Hp = u.Hp; x.Bar.Value = u.Hp;
                 if (!u.Alive && !x.Down) { x.Down = true; x.Sprite.Modulate = new Color(1, 1, 1, 0.5f); }
+                if (u.Status != x.Status || x.Down) SetStatus(x, u.Status);
                 if (u.Escaped) x.Sprite.Visible = false;
             }
         UpdateStatus(v.Turn);
