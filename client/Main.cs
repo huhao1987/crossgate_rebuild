@@ -159,8 +159,8 @@ public partial class Main : Node2D
     private Hud _hudSkin = null!;
     private BattleUi _battleUi = null!;
     private DialogPanel _dialog = null!;
-    private ShopPanel _shop = null!;
-    public ShopPanel Shop => _shop;
+    private ShopTradeWindow _shop = null!;
+    public ShopTradeWindow Shop => _shop;
     private BagPanel _bag = null!;
     private Toast _toast = null!;
     private CalibrationPanel _calib = null!;
@@ -307,7 +307,6 @@ public partial class Main : Node2D
         _session.DialogChanged += p =>
         {
             bool shop = p?.Shop != null, menu = p?.Kind == "shop";
-            _shop.Gold = _session.Player.Gold;
             _shop.ShowPage(shop ? p : null);
             _shopMenu.ShowPage(menu ? p : null);
             _dialog.ShowPage(_talkingTo, shop || menu ? null : p);
@@ -526,11 +525,12 @@ public partial class Main : Node2D
         _dialog = new DialogPanel { Cache = _cache };
         AddChild(_dialog);
         _dialog.ButtonPressed += b => _session.Answer(b);
-        _shop = new ShopPanel { Cache = _cache };
+        // 商店买 / 卖（官方专用窗口，见 ShopTrade.cs）；「取消」官方不发包，只关窗口
+        _shop = new ShopTradeWindow { Cache = _cache, StandAct = _cfg.ActStand, Gold = () => _session.Player.Gold, FreeSlots = () => 20 - _session.Player.Items.Count(i => i.Slot is >= 8 and < 28) };
+        _shop.Submit = a => { if (a != "cancel") _session.Answer(a); };
         AddChild(_shop);
-        _shopMenu = new ShopMenuWindow { Cache = _cache, Choose = i => _session.Answer($"opt:{i}") };
+        _shopMenu = new ShopMenuWindow { Cache = _cache, StandAct = _cfg.ActStand, Choose = i => _session.Answer($"opt:{i}") };
         AddChild(_shopMenu);
-        _shop.Submit += a => _session.Answer(a);
         _bag = new BagPanel { Cache = _cache, Session = _session };
         AddChild(_bag);
         _pets = new PetListWindow { Cache = _cache, Pets = () => _session.Player.Pets, SetState = (slot, st) => (_session as NetworkSession)?.SetPetState(slot, st) };

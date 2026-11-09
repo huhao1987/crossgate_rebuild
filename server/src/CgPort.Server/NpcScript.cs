@@ -122,10 +122,18 @@ public sealed record DialogPage(string Text, IReadOnlyList<string> Buttons, bool
     /// <summary>NPC 头像（全局图像编号），0 = 没有。</summary>
     public int Face { get; init; }
     public IReadOnlyList<ShopEntry>? Shop { get; init; }
+    /// <summary>商店买窗口的另外两句话：[0] 钱不够、[1] 背包放不下（BZ 6 第 4、5 段）。</summary>
+    public IReadOnlyList<string>? AltTexts { get; init; }
 }
 
 /// <summary>商店列表里的一项。买：Price 是单价、Max 是一次最多买几个；卖：Slot 是背包格子、Count 是持有数量。</summary>
-public sealed record ShopEntry(string Name, int Image, int Price, string Desc, int Count = 0, int Slot = -1, int Max = 1);
+public sealed record ShopEntry(string Name, int Image, int Price, string Desc, int Count = 0, int Slot = -1, int Max = 1)
+{
+    /// <summary>买：能不能装备（BZ 6 每件第 5 段，0 = 不能，官方画红叉、价钱灰）；卖：能不能卖（BZ 7 第 9 段，0 = 不能，价钱红字、▲加不上去）。</summary>
+    public int Flag { get; init; } = 1;
+    /// <summary>卖：一组几个（BZ 7 第 10 段，0 当 1）；卖的数量按组算（官方 "%4d/组"）。</summary>
+    public int Stack { get; init; } = 1;
+}
 
 /// <summary>脚本运行时需要的玩家/世界接口。</summary>
 public interface IScriptHost

@@ -151,6 +151,7 @@ public partial class ShopPanel : CanvasLayer
 public partial class ShopMenuWindow : CgWindow
 {
     public Action<int>? Choose;   // 0 想买 / 1 想卖 / 2 不必了
+    public int StandAct;
     private DialogPage? _page;
     public DialogPage? Page => _page;
     private const float Ox = 12, Oy = 3;
@@ -173,7 +174,7 @@ public partial class ShopMenuWindow : CgWindow
         if (p.Face > 0)
         {
             var holder = new Node2D { Position = new Vector2(43 + Ox, 134 + Oy) };
-            holder.AddChild(new AnimSprite { Cache = Cache, AnimeId = p.Face, Act = 0, FallbackAct = 0, Dir = 3 });
+            holder.AddChild(new AnimSprite { Cache = Cache, AnimeId = p.Face, Act = StandAct, FallbackAct = StandAct, Dir = 3 });
             Body.AddChild(holder);
         }
         var lines = Wrap(p.Text.Replace("\n", ""), 26).Take(5).ToList();

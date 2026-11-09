@@ -92,7 +92,7 @@ public partial class NetE2E : SceneTree
             case 42 when _page?.Kind == "buy" && _frame > 30:
                 Check(_main.Shop.Visible && _page.Shop!.Count > 0, $"商店买东西列表：{string.Join("、", _page.Shop!.Select(e => $"{e.Name} {e.Price}G"))}");
                 Shot("shop_buy");
-                _main.Shop.EmitSignal(ShopPanel.SignalName.Submit, "buy:0:1");
+                _main.Shop.Add(0, 1); _main.Shop.Ok(); _main.Shop.Yes();
                 _stage = 43; _frame = 0; break;
             case 43 when _frame == 90:
                 Check(s!.Player.Gold == _gold0 - 75 && (s.Player.Items.Sum(i => i.Count) == _items0 + 1 || s.Player.Items.Count >= 20), $"买到 1 件（背包 {s.Player.Items.Count}/20 格）：金钱 {_gold0} → {s.Player.Gold}，道具 {_items0} → {s.Player.Items.Sum(i => i.Count)}");

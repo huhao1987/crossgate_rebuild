@@ -261,7 +261,9 @@ public partial class CgText : Control
     private string _text = "";
     public string Text { get => _text; set { _text = value; _lines = Layout(value, Wrap); QueueRedraw(); } }
     public Color FontColor = Colors.White;
-    public int Wrap = WrapCells;
+    private int _wrap = WrapCells;
+    /// <summary>每行几格（改了马上重排；以前是字段，初始化里写在 Text 后面就不生效）。</summary>
+    public int Wrap { get => _wrap; set { _wrap = value; _lines = Layout(_text, value); QueueRedraw(); } }
     public int LineHeight = LineH;
     private List<string> _lines = new();
     private static Font? _font;

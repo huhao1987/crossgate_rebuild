@@ -2149,15 +2149,15 @@ public sealed class NetworkSession : IGameSession
             {
                 // 买：…|钱不够的话|背包满的话|然后每件 6 段：名字|图像|单价|说明|?|一次最多几个
                 var list = new List<ShopEntry>();
-                for (int i = 5; i + 5 < q.Length; i += 6) list.Add(new ShopEntry(T(i), N(i + 1), N(i + 2), T(i + 3), 0, -1, Math.Max(1, N(i + 5))));
-                page = new DialogPage(common.Text, new List<string> { "cancel" }, false) { Kind = "buy", Shop = list };
+                for (int i = 5; i + 5 < q.Length; i += 6) list.Add(new ShopEntry(T(i), N(i + 1), N(i + 2), T(i + 3), 0, -1, Math.Max(1, N(i + 5))) { Flag = N(i + 4) });
+                page = new DialogPage(common.Text, new List<string> { "cancel" }, false) { Kind = "buy", Shop = list, AltTexts = new[] { T(3), T(4) } };
             }
             else
             {
                 // 卖：…|然后每件 10 段：名字|数量|图像|价格|格子|?|?|说明|可卖数量|堆叠上限
                 // 第 9 段 = 可卖数量（官方客户端实测 2026-11-04：本服药剂师对每件都发 0，官方客户端点▲提示"无法再增加"、卖不了）。
                 var list = new List<ShopEntry>();
-                for (int i = 3; i + 9 < q.Length; i += 10) list.Add(new ShopEntry(T(i), N(i + 2), N(i + 3), T(i + 7), Math.Max(1, N(i + 1)), N(i + 4), N(i + 8)));
+                for (int i = 3; i + 9 < q.Length; i += 10) list.Add(new ShopEntry(T(i), N(i + 2), N(i + 3), T(i + 7), Math.Max(1, N(i + 1)), N(i + 4), N(i + 8)) { Flag = N(i + 8), Stack = Math.Max(1, N(i + 9)) });
                 page = new DialogPage(common.Text, new List<string> { "cancel" }, false) { Kind = "sell", Shop = list };
             }
             page = page with { NpcName = common.Npc, Face = common.Face };
