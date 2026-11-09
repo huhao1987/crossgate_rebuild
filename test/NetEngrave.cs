@@ -10,7 +10,9 @@ public partial class NetEngrave : SceneTree
     int _f, _st, _sw = -1; Main _m = null!; readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_engrave_{n}.png");
-    bool End() { (_m.Session as NetworkSession)?.Say("/dolua gm_kakuin_undo.lua"); GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
+    // 收尾：先把技能还原，等服务端处理完再退出（马上退出的话还原指令会丢）
+    bool End() { (_m.Session as NetworkSession)?.Say("/dolua gm_kakuin_undo.lua"); _st = 98; _f = 0; return false; }
+    bool Quit() { GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
     public override void _Initialize()
     {
         var root = "/home/claude/wine/client";
@@ -49,6 +51,7 @@ public partial class NetEngrave : SceneTree
                 Check(Sword(s!)?.Engraved == "haoabc", $"剑上刻的字：「{Sword(s!)?.Engraved}」");
                 Shot("2_result"); p.CloseAll(); return End();
         }
+        if (_st == 98 && _f == 120) return Quit();
         return _f > 3000;
     }
 }

@@ -51,6 +51,8 @@ public sealed class GameConfig
     public int TransStyle;
     /// <summary>聊天设定（官方 exe 0x448a00）：显示行数 0–20（默认 2）、文字颜色 0–9 跳过 4（默认 5 绿）、聊天范围 1–5（默认 5）。颜色和范围随说话包发出（uSr … 颜色 范围 1）。</summary>
     public int ChatLines = 2, ChatColor = 5, ChatRange = 5;
+    /// <summary>名片簿排列：0 登录顺序、1 等级顺序、2 上线顺序（官方存在设定 0x186fdfb）。</summary>
+    public int CardSort;
     /// <summary>高级设定（官方 PC 版的显示选项）：后台窗口跳帧（切到后台降帧）、窗口模式（关 = 全屏）、扫描线同步（垂直同步）。</summary>
     public bool BgSkip, Windowed = true, VSync;
     /// <summary>自动战斗选项位（见 AutoBattle，默认 0x42 = 智能选择 + BOSS 战停止）。</summary>
@@ -181,7 +183,7 @@ public sealed class GameConfig
             Encounters = o["encounters"]?.GetValue<bool>() ?? true,
             Zoom = (float)(o["zoom"]?.GetValue<double>() ?? 1.0),
             LoadSave = o["load_save"]?.GetValue<bool>() ?? true,
-            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), HideChars = Int(o, "hide_chars", Int(o, "hide_players", 0) != 0 ? 2 : 0), BattleBgFix = Int(o, "battle_bg_fix", 1) != 0, TransStyle = Int(o, "trans_style", 0), ChatLines = Int(o, "chat_lines", 2), ChatColor = Int(o, "chat_color", 5), ChatRange = Int(o, "chat_range", 5), BgSkip = Int(o, "bg_skip", 0) != 0, AutoOpts = Int(o, "auto_opts", AutoBattle.Default), Windowed = Int(o, "windowed", 1) != 0, VSync = Int(o, "vsync", 0) != 0, CharSelect = Int(o, "char_select", 1) != 0, ShowNpcNames = Int(o, "npc_names", 1) != 0, MapLabelMask = Int(o, "map_labels", 0b1010001), UiMode = Str(o, "ui_mode", ""),
+            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), HideChars = Int(o, "hide_chars", Int(o, "hide_players", 0) != 0 ? 2 : 0), BattleBgFix = Int(o, "battle_bg_fix", 1) != 0, TransStyle = Int(o, "trans_style", 0), ChatLines = Int(o, "chat_lines", 2), CardSort = Int(o, "card_sort", 0), ChatColor = Int(o, "chat_color", 5), ChatRange = Int(o, "chat_range", 5), BgSkip = Int(o, "bg_skip", 0) != 0, AutoOpts = Int(o, "auto_opts", AutoBattle.Default), Windowed = Int(o, "windowed", 1) != 0, VSync = Int(o, "vsync", 0) != 0, CharSelect = Int(o, "char_select", 1) != 0, ShowNpcNames = Int(o, "npc_names", 1) != 0, MapLabelMask = Int(o, "map_labels", 0b1010001), UiMode = Str(o, "ui_mode", ""),
             Account = Str(o, "account", ""), Password = Str(o, "password", ""), CdKey = Str(o, "cdkey", ""),
         };
         if (o["start"] is JsonArray st && st.Count == 2) { c.StartX = st[0]!.GetValue<int>(); c.StartY = st[1]!.GetValue<int>(); }

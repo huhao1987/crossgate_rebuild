@@ -13,7 +13,9 @@ public partial class NetRankUp : SceneTree
     readonly List<string> _r = new(), _chat = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_rankup_{n}.png");
-    bool End() { (_m.Session as NetworkSession)?.Say("/dolua gm_jobx_undo.lua"); GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
+    // 收尾：先还原（等服务端处理完再退出，不然还原指令会丢，下一个测试拿到 Lv20 的剑士）
+    bool End() { (_m.Session as NetworkSession)?.Say("/dolua gm_jobx_undo.lua"); _st = 98; _f = 0; return false; }
+    bool Quit() { GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
     public override void _Initialize()
     {
         var root = "/home/claude/wine/client";
@@ -48,7 +50,7 @@ public partial class NetRankUp : SceneTree
             case 3 when _page != null && _f > 30:
                 Check(_page.Text.Contains("手续费总共是") && _page.Text.Contains("5000") && _page.Options?.Count == 2 && _page.Options[0] == "是", $"手续费确认：{_page.Text.Replace("\n", "/")} [{string.Join("/", _page.Options ?? new List<string>())}]");
                 Shot("1_fee"); _page = null; _gold = s!.Player.Gold; s.Answer("opt:0"); _st = 4; _f = 0; break;
-            case 3 when _f > 300: Check(false, $"没出手续费确认"); return End();
+            case 3 when _f > 300: Check(false, $"没出手续费确认（{_page?.Text.Replace("\n", "/")}）"); return End();
             case 4 when _f == 120:
                 Check(s!.Player.Job == "剑士", $"职业：{s.Player.Job}");
                 Check(_gold - s.Player.Gold == 5000, $"手续费：{_gold} → {s.Player.Gold}");
@@ -56,7 +58,8 @@ public partial class NetRankUp : SceneTree
                 Check(s.Titles.Contains("剑士"), $"称号：{string.Join(",", s.Titles)}");
                 Shot("2_done"); s.Say("/dolua gm_jobx_undo.lua"); _st = 5; _f = 0; break;
             case 5 when _f == 90:
-                Check(s!.Player.Job == "见习剑士", $"还原：{s.Player.Job}"); return End();
+                Check(s!.Player.Job == "见习剑士" && s.Player.Level == 2, $"还原：{s.Player.Job} Lv{s.Player.Level}"); return Quit();
+            case 98 when _f == 120: return Quit();
         }
         return _f > 3000;
     }

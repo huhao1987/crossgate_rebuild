@@ -15,6 +15,24 @@ public partial class CardBookWindow : CgWindow
     public Action<int>? WriteMail;     // 点「郵件」
     public Action<int>? ShowRecord;    // 点「記錄」
     public Action<int>? AskDelete;     // 点「刪除」
+    public Action? OpenSort;           // 点「排列」
+    public Func<int> SortMode = () => 0;
+
+    /// <summary>
+    /// 显示顺序（exe 0x44bc94 用 qsort 排 60 张，结果放 0x18708a0）：空名片排最后。
+    /// 0 登录顺序 = ABI 第 4 段从小到大；1 等级顺序 = 等级从高到低，同级按登录顺序；2 上线顺序 = 在线的在前，再按登录顺序。
+    /// </summary>
+    public static int[] Order(IReadOnlyList<NetworkSession.AddressCard?> cards, int mode)
+    {
+        long Key(int i) => cards[i] is { } c ? c.Seq : 10000;
+        var idx = Enumerable.Range(0, cards.Count);
+        return (mode switch
+        {
+            1 => idx.OrderByDescending(i => cards[i]?.Level ?? -1).ThenBy(Key),
+            2 => idx.OrderByDescending(i => cards[i] is { } c ? (c.Online ? 1 : 0) : -1).ThenBy(Key),
+            _ => idx.OrderBy(Key),
+        }).ThenBy(i => i).ToArray();
+    }
     private int _page;
     public int Page => _page;
 
@@ -25,9 +43,10 @@ public partial class CardBookWindow : CgWindow
         Clear();
         var s = Session(); if (s == null) return;
         Img(23100, 0, 0, block: true);
+        var order = Order(s.Cards, SortMode());
         for (int k = 0; k < 4; k++)
         {
-            int idx = _page * 4 + k; float dy = 90 * k;
+            int idx = order[_page * 4 + k]; float dy = 90 * k;
             Txt("名字", 77, 61 + dy); Txt("家族", 77, 80 + dy); Txt("稱號", 77, 98 + dy);
             var c = s.Cards[idx];
             if (c == null) continue;
@@ -45,7 +64,7 @@ public partial class CardBookWindow : CgWindow
             Btn(23103, 23104, 211, 66 + dy, () => ShowRecord?.Invoke(idx));
             Btn(23105, 23106, 211, 90 + dy, () => AskDelete?.Invoke(idx));
         }
-        Btn(23107, 23108, 20, 396, () => { });   // 排列：官方行为还没查
+        Btn(23107, 23108, 20, 396, () => OpenSort?.Invoke());   // 排列 → 整理名片窗口
         Btn(22832, 22833, 139, 396, () => { _page = (_page + 14) % 15; Refresh(); });
         Btn(22834, 22835, 226, 396, () => { _page = (_page + 1) % 15; Refresh(); });
         Txt($"{_page + 1}/15", 197, 402, center: true);
@@ -216,4 +235,41 @@ public partial class ConfirmBox : CanvasLayer
     }
 
     public void TestYes() { Visible = false; _yes?.Invoke(); }
+}
+
+/// <summary>
+/// 整理名片（名片簿「排列」，官方 exe 0x446da3 起，名片簿模式 6）：背景 23170（192×254）在 (0,0)，关闭 22509 (167,7)。
+/// 三行 登录顺序 / 等级顺序 / 上线顺序：点的范围 (20, 40+30k) 152×24，选中的那行画青色框；
+/// 「確定」22712/22713 中心 (97,183)：存起来、按新顺序排，回名片簿（排列只在本地，不发包）。
+/// </summary>
+public partial class CardSortWindow : CgWindow
+{
+    public Func<int> Mode = () => 0;
+    public Action<int>? Confirm;
+    public Action? Back;
+    private int _sel;
+    public int Selected => _sel;
+    private static readonly string[] Names = { "登录顺序", "等级顺序", "上线顺序" };
+
+    public override void _Ready() { Layer = 13; Visible = false; Build(Vector2.Zero, false); }
+    public void Open() { _sel = Mode(); Visible = true; Refresh(); }
+
+    public override void Refresh()
+    {
+        Clear();
+        Img(23170, 0, 0, block: true);
+        for (int k = 0; k < 3; k++)
+        {
+            int kk = k; float y = 40 + 30 * k;
+            if (k == _sel) Body.AddChild(new ReferenceRect { Position = new Vector2(20, y), Size = new Vector2(152, 24), BorderColor = new Color(0, 1, 1), BorderWidth = 2, EditorOnly = false, MouseFilter = Control.MouseFilterEnum.Ignore });
+            Txt(Names[k], 62, y + 9, Colors.White);
+            Hit(20, y, 152, 24, _ => Pick(kk), box: false);
+        }
+        var ok = Cache.ImageNo(22712).Tex?.GetSize() ?? new Vector2(80, 20);
+        Btn(22712, 22713, 97 - ok.X / 2, 183 - ok.Y / 2, Ok);
+        Btn(22509, 22510, 167, 7, () => { Visible = false; Back?.Invoke(); });
+    }
+
+    public void Pick(int k) { _sel = k; GameAudio.Se(59); Refresh(); }
+    public void Ok() { GameAudio.Se(51); Visible = false; Confirm?.Invoke(_sel); }
 }

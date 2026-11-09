@@ -76,6 +76,10 @@ public partial class Main : Node2D
     public PetMailEditWindow PetMailEditUi => _petMailEdit;
     public PetMailItemWindow PetMailItemsUi => _petMailItems;
     private GuildBeastWindow _guildBeast = null!;
+    private CardSortWindow _cardSort = null!;
+    private ShopMenuWindow _shopMenu = null!;
+    public ShopMenuWindow ShopMenuUi => _shopMenu;
+    public CardSortWindow CardSortUi => _cardSort;
     public GuildBeastWindow GuildBeastUi => _guildBeast;
     private readonly HashSet<string> _fxHidden = new();
     public int PetMailFxCount { get; private set; }
@@ -94,7 +98,7 @@ public partial class Main : Node2D
     {
         if (!_auto.On || _session is not NetworkSession ns || !ns.InBattle || _battleUi.Busy || !_battleUi.PanelState.Visible || ns.CommandSlot < 0) return;
         if (_auto.ShouldStop(ns)) { _battleUi.SetAuto(false); return; }
-        if (_auto.Decide(ns, ns.CurrentBattle.Turn, ns.CommandSlot, ns.PetTurn) is { } c) _battleUi.AutoAct(c);
+        if (_auto.Decide(ns, ns.CurrentBattle.Turn, ns.CommandSlot, ns.PetTurn) is { } c) _battleUi.AutoAct(c, ns.CurrentBattle.Turn);
     }
     private BattleUi _replayUi = null!;
     private VideoListWindow _videoList = null!;
@@ -302,10 +306,11 @@ public partial class Main : Node2D
         _session.RewardsGained += OnRewards;
         _session.DialogChanged += p =>
         {
-            bool shop = p?.Shop != null;
+            bool shop = p?.Shop != null, menu = p?.Kind == "shop";
             _shop.Gold = _session.Player.Gold;
             _shop.ShowPage(shop ? p : null);
-            _dialog.ShowPage(_talkingTo, shop ? null : p);
+            _shopMenu.ShowPage(menu ? p : null);
+            _dialog.ShowPage(_talkingTo, shop || menu ? null : p);
             if (p == null) AutoSave();
         };
         _session.StatusChanged += () =>
@@ -344,7 +349,12 @@ public partial class Main : Node2D
             else if (id == 22591) ToggleEmote();
         };
         // 名片簿 / 写信 / 邮件记录 / 删除确认
-        _cardBook = new CardBookWindow { Cache = _cache, Session = () => _session as NetworkSession };
+        _cardBook = new CardBookWindow { Cache = _cache, Session = () => _session as NetworkSession, SortMode = () => _cfg.CardSort };
+        _cardSort = new CardSortWindow { Cache = _cache, Mode = () => _cfg.CardSort };
+        _cardSort.Confirm = m => { _cfg.CardSort = m; GameConfig.Patch(("card_sort", m)); _cardBook.Visible = true; _cardBook.Refresh(); };
+        _cardSort.Back = () => { _cardBook.Visible = true; _cardBook.Refresh(); };
+        _cardBook.OpenSort = () => { _cardBook.Visible = false; _cardSort.Open(); };
+        AddChild(_cardSort);
         _mailEdit = new MailEditWindow { Cache = _cache, Session = () => _session as NetworkSession };
         _mailRecord = new MailRecordWindow { Cache = _cache, Session = () => _session as NetworkSession };
         _confirm = new ConfirmBox { Cache = _cache };
@@ -496,7 +506,7 @@ public partial class Main : Node2D
         _battleUi.AutoToggled = on => _auto.On = on;
         _battleUi.OptionsPressed = () => _autoOpts.Toggle();
         _battleUi.CommandTarget += (k, t) => { if (t >= 10) _auto.LastTarget = t; };
-        _session.BattleStarted += _ => { _auto.BattleStarted(); _battleUi.SetAuto(_auto.On); };
+        _session.BattleStarted += _ => { _auto.BattleStarted(); _battleUi.ResetAutoRounds(); _battleUi.SetAuto(_auto.On); };
         _session.BattleEnded += _ => _autoOpts.Visible = false;
         // 战斗录像：「本局錄像」→ 打完存档（缩略图取点按钮那一刻的画面）；系统 → 战斗录像 → 列表 → 播放
         _replayUi = new BattleUi { Cache = _cache, Cfg = _cfg, ReadOnly = true };
@@ -518,6 +528,8 @@ public partial class Main : Node2D
         _dialog.ButtonPressed += b => _session.Answer(b);
         _shop = new ShopPanel { Cache = _cache };
         AddChild(_shop);
+        _shopMenu = new ShopMenuWindow { Cache = _cache, Choose = i => _session.Answer($"opt:{i}") };
+        AddChild(_shopMenu);
         _shop.Submit += a => _session.Answer(a);
         _bag = new BagPanel { Cache = _cache, Session = _session };
         AddChild(_bag);
@@ -592,7 +604,7 @@ public partial class Main : Node2D
             // 左边的窗口（状态/技能/宠物/名片/图鉴/系统）都在左上角同一个位置，右边的（地图/物品）都贴右上：
             // 打开一个就把同一边的其它窗口关掉，不叠在一起（手机上叠着根本看不清）
             bool right = i is 0 or 3;
-            var leftWins = new CanvasLayer?[] { _status, _skills, _pets, _petDetail, _cardBook, _mailEdit, _mailRecord, _mailType, _petMailPets, _petMailEdit, _petMailItems, _album, _system };
+            var leftWins = new CanvasLayer?[] { _status, _skills, _pets, _petDetail, _cardBook, _cardSort, _mailEdit, _mailRecord, _mailType, _petMailPets, _petMailEdit, _petMailItems, _album, _system, _guildBeast };
             var rightWins = new CanvasLayer?[] { _mapWin, _items, _gold };
             var mine = i switch { 0 => _mapWin, 1 => _status, 2 => _skills, 3 => (CanvasLayer)_items, 4 => _pets, 5 => _cardBook, 6 => _album, 7 => _system, _ => null };
             foreach (var w in right ? rightWins : leftWins) if (w != null && w != mine && !(i == 4 && w == _petDetail)) w.Visible = false;
@@ -1026,7 +1038,7 @@ public partial class Main : Node2D
         if (_func != null) _func.Visible = !c && !_session.InBattle && _session is NetworkSession;
         bool l = (_status?.Visible ?? false) || (_skills?.Visible ?? false) || (_system?.Visible ?? false)
               || (_pets?.Visible ?? false) || (_petDetail?.Visible ?? false)
-              || (_cardBook?.Visible ?? false) || (_album?.Visible ?? false) || (_prod?.AnyVisible ?? false) || (_mailEdit?.Visible ?? false) || (_mailRecord?.Visible ?? false) || (_mailType?.Visible ?? false) || (_petMailPets?.Visible ?? false) || (_petMailEdit?.Visible ?? false) || (_guildBeast?.Visible ?? false);
+              || (_cardBook?.Visible ?? false) || (_album?.Visible ?? false) || (_prod?.AnyVisible ?? false) || (_mailEdit?.Visible ?? false) || (_mailRecord?.Visible ?? false) || (_mailType?.Visible ?? false) || (_petMailPets?.Visible ?? false) || (_petMailEdit?.Visible ?? false) || (_guildBeast?.Visible ?? false) || (_cardSort?.Visible ?? false);
         if (l != _leftCovered) { _leftCovered = l; _hudSkin?.SetLeftCovered(l); }
     }
 
@@ -1044,6 +1056,7 @@ public partial class Main : Node2D
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.Apostrophe } && _session is NetworkSession nst) nst.RequestTrade();   // 官方 Ctrl+' 交易
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.J } && _session is NetworkSession nsj) nsj.Duel();    // 官方 Ctrl+J 对战
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.K } && _session is NetworkSession nsk) nsk.Watch();   // 官方 Ctrl+K 观战
+        else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.R, Echo: false } && _battleUi.Visible && !_battleUi.ReadOnly) _battleUi.SetAuto(!_battleUi.AutoOn);   // 官方 Ctrl+R 自动战斗开关（exe 提示 0x47b594）
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.B }) ToggleStall();   // 官方 Ctrl+B 摆摊
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.F }) ToggleEmote();   // 官方 Ctrl+F 情绪动作
         else if (e is InputEventKey ck && _chatIn != null && _chatIn.TryStart(ck)) GetViewport().SetInputAsHandled();   // 直接打字 = 聊天（官方同）

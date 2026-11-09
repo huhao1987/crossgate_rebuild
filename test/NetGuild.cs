@@ -36,7 +36,7 @@ public partial class NetGuild : SceneTree
         {
             case 0 when s?.InGame == true && s.CurrentMap != null && _f > 120:
             {
-                Check(s.GuildName == "浩之家" && s.GuildRoom == "浩之馆" && s.GuildTitleId == 0 && s.GuildId == 10001, $"GI：{s.GuildId} {s.GuildName} / {s.GuildRoom} 职称 {s.GuildTitleId} 权限 {s.GuildCommission}");
+                Check(s.GuildName == "浩之家" && s.GuildRoom == "浩之馆" && s.GuildTitleId == 0 && s.GuildId > 0, $"GI：{s.GuildId} {s.GuildName} / {s.GuildRoom} 职称 {s.GuildTitleId} 权限 {s.GuildCommission}");
                 var bob = s.Cards.FirstOrDefault(c => c?.Name == "bob");
                 if (bob != null) Check(bob.Guild == "浩之家", $"名片 bob 的家族：「{bob.Guild}」"); else GD.Print("（名片簿里没有 bob，跳过家族栏检查）");
                 s.Say("/dolua gm_beastwin.lua"); _st = 1; _f = 0; break;

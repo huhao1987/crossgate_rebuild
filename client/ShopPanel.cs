@@ -140,3 +140,73 @@ public partial class ShopPanel : CanvasLayer
             : "sell:" + string.Join(",", sel.Select(x => $"{x.e.Slot}:{_qty[x.i]}")));
     }
 }
+
+/// <summary>
+/// 商店入口（服务端 BZ 种类 5，官方 exe 0x41efee 读、0x4236a9 画）：背景 23050（292×260），画在 ((W−256)/2, (H−312)/2)（图本身往左上偏 12,3）。
+///   标题 = NPC 名字，中心 x 145、y 8；NPC 站在 (43,134)；对话框里的话按 26 字节折行，(97, 44+21k)，最多 5 行；
+///   选项「 想  买 」「 想  卖 」「不 必 了」在 (170, 157+24k)，第 i 项在 掩码 & i 非 0 时才有；
+///   点想买 / 想卖 → xD … 0 "1"/"2"（音效 79）；点不必了 / × → 关掉（音效 57），不发包。
+/// （下面的坐标是相对 (352,204) 的官方坐标；窗口节点放在 (340,201)，所以统一 +12,+3。）
+/// </summary>
+public partial class ShopMenuWindow : CgWindow
+{
+    public Action<int>? Choose;   // 0 想买 / 1 想卖 / 2 不必了
+    private DialogPage? _page;
+    public DialogPage? Page => _page;
+    private const float Ox = 12, Oy = 3;
+
+    public override void _Ready() { Layer = 20; Visible = false; Build(new Vector2(340, 201), false); }
+
+    public void ShowPage(DialogPage? p)
+    {
+        _page = p?.Kind == "shop" ? p : null;
+        Visible = _page != null;
+        if (Visible) Refresh();
+    }
+
+    public override void Refresh()
+    {
+        Clear();
+        if (_page is not { } p) return;
+        Img(23050, 0, 0, block: true);
+        Txt(p.NpcName, 145 + Ox, 8 + Oy + 6, Colors.White, center: true);
+        if (p.Face > 0)
+        {
+            var holder = new Node2D { Position = new Vector2(43 + Ox, 134 + Oy) };
+            holder.AddChild(new AnimSprite { Cache = Cache, AnimeId = p.Face, Act = 0, FallbackAct = 0, Dir = 3 });
+            Body.AddChild(holder);
+        }
+        var lines = Wrap(p.Text.Replace("\n", ""), 26).Take(5).ToList();
+        for (int k = 0; k < lines.Count; k++) Txt(lines[k], 97 + Ox, 44 + 21 * k + Oy + 6, Colors.White);
+        string[] labels = { " 想  买 ", " 想  卖 ", "不 必 了" };
+        var opts = p.Options ?? new List<string>();
+        for (int i = 0; i < 3; i++)
+        {
+            if (i >= opts.Count || opts[i].Length == 0) continue;
+            int ii = i; float y = 157 + 24 * i + Oy;
+            Txt(labels[i], 170 + Ox, y + 6, Colors.White);
+            Hit(170 + Ox - 2, y, 66, 20, _ => Pick(ii), box: false);
+        }
+        Btn(22509, 22510, 280, 8, () => Pick(2));
+    }
+
+    public void Pick(int i)
+    {
+        GameAudio.Se(i == 2 ? 57 : 79);
+        Visible = false;
+        Choose?.Invoke(i);
+    }
+
+    /// <summary>按 GBK 字节宽度折行（官方 0x40f581：26 字节一行）。</summary>
+    public static IEnumerable<string> Wrap(string s, int width)
+    {
+        var sb = new System.Text.StringBuilder(); int n = 0;
+        foreach (var ch in s)
+        {
+            int w = ch < 0x80 ? 1 : 2;
+            if (n + w > width) { yield return sb.ToString(); sb.Clear(); n = 0; }
+            sb.Append(ch); n += w;
+        }
+        if (sb.Length > 0) yield return sb.ToString();
+    }
+}

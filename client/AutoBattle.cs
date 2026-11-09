@@ -6,8 +6,9 @@ namespace CgPort.Godot;
 
 /// <summary>
 /// 自动战斗（这个私服客户端加的「自動」「選項」，官方 exe 0x405700 起；选项位 0x499604，默认 0x42）：
+///   标题 对敌目标主选项： / 我方生命低于50%(带宠战斗): / 停止自动战斗：（exe 字串）
 ///   位 0 原定目标(位置)优先「优先攻击某位置的目标。」/ 位 1 智能选择「随机选取合适的目标。」（两个只能选一个）；
-///   我方生命低于 50%(带宠战斗)：位 2 恢复类魔法补血「使用魔法恢复目标生命值。」、位 3 去道具补血「通过嗑药给目标恢复生命。」、位 4 宠物护卫「让宠物护卫该目标。」；
+///   我方生命低于 50%(带宠战斗)：位 2 恢复类魔法补血「使用魔法恢复目标生命值。」、位 3 丢道具补血「通过嗑药给目标恢复生命。」、位 4 宠物护卫「让宠物护卫该目标。」；
 ///   停止自动战斗：位 5 遇到 Lv1 魔族时、位 6 战斗为 BOSS 战时（EN 战斗种类 4–6）。
 /// 每次要指令（面板出来）就替玩家 / 宠物下指令。"原定目标"= 最近一次手动点的敌人位置，倒了就随便挑一个。
 /// </summary>
@@ -80,10 +81,16 @@ public partial class AutoBattleOptions : CanvasLayer
     private static readonly (int Bit, string Text, float Y)[] Items =
     {
         (0, "原定目标(位置)优先", 153), (1, "智能选择", 173),
-        (2, "恢复类魔法补血", 213), (3, "去道具补血", 233), (4, "宠物护卫", 253),
+        (2, "恢复类魔法补血", 213), (3, "丢道具补血", 233), (4, "宠物护卫", 253),
         (5, "遇到Lv1魔族时", 293), (6, "战斗为BOSS战时", 313),
     };
 
+    /// <summary>鼠标提示（exe 0x47b744 起）。</summary>
+    private static readonly string[] Tips =
+    {
+        "优先攻击某位置的目标。", "随机选取合适的目标。", "使用魔法恢复目标生命值。", "通过嗑药给目标恢复生命。", "让宠物护卫该目标。",
+        "敌人中有等级1的怪物时不再执行自动指令。", "本场战斗为BOSS战时不再执行自动指令。",
+    };
     public override void _Ready() { Layer = 12; Visible = false; }
     public void Toggle() { Visible = !Visible; if (Visible) Refresh(); }
 
@@ -96,13 +103,13 @@ public partial class AutoBattleOptions : CanvasLayer
         full.AddChild(_root);
         _root.AddChild(new Bg { Size = _root.Size });
         var green = new Color(0.3f, 0.95f, 0.3f);
-        Head("攻击目标选项", 133, green); Head("我方生命低于50%(带宠战斗)", 193, green); Head("停止自动战斗", 273, green);
+        Head("对敌目标主选项：", 133, green); Head("我方生命低于50%(带宠战斗):", 193, green); Head("停止自动战斗：", 273, green);   // 字串取自 exe 0x47b69c 起
         foreach (var (bit, text, y) in Items)
         {
             bool on = (Auto.Options & (1 << bit)) != 0;
             _root.AddChild(new Check { On = on, Position = new Vector2(721 - 705, y - 113 + 4) });
             _root.AddChild(new CgText { Text = text, FontColor = Colors.White, Position = new Vector2(737 - 705, y - 113), Wrap = 30 });
-            var hit = new Control { Position = new Vector2(10, y - 113), Size = new Vector2(226, 18), MouseFilter = Control.MouseFilterEnum.Stop };
+            var hit = new Control { Position = new Vector2(10, y - 113), Size = new Vector2(226, 18), MouseFilter = Control.MouseFilterEnum.Stop, TooltipText = Tips[bit] };
             int b = bit;
             hit.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) Flip(b); };
             _root.AddChild(hit);

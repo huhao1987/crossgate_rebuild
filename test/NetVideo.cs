@@ -33,7 +33,7 @@ public partial class NetVideo : SceneTree
                 if (_f > 6000) { Check(false, "遇敌"); return End(); }
                 break;
             case 1 when s!.InBattle: _st = 2; _f = 0; break;
-            case 2 when _f == 60:
+            case 2 when _f == 5:   // 一进战斗就开录像（敌人第一回合就逃跑的话战斗很短）
                 Check(b.Visible, "进战斗");
                 b.SetRecording(true); _st = 3; _f = 0; break;
             case 3 when _f == 10:

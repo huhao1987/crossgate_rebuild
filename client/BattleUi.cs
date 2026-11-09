@@ -228,7 +228,9 @@ public partial class BattleUi : CanvasLayer
         _panel!.AddChild(bar);
         _recBtn = ExeBtn(175, P(780, 79), () => SetRecording(!Recording));
         _autoBtn = ExeBtn(174, P(861, 79), () => SetAuto(!AutoOn));
-        ExeBtn(252, P(906, 79), () => OptionsPressed?.Invoke(), 253);
+        if (_autoBtn != null) _autoBtn.TooltipText = "点击开启自动战斗(Ctrl+R)。";
+        if (ExeBtn(252, P(906, 79), () => OptionsPressed?.Invoke(), 253) is { } ob) ob.TooltipText = "更改或查看自动战斗的策略。";
+        if (_recBtn != null) _recBtn.TooltipText = "点击保存本场战斗录像。";   // exe 0x47b564 / 0x47b580
     }
     private TextureButton? ExeBtn(int id, Vector2 pos, Action a, int hover = -1)
     {
@@ -240,22 +242,28 @@ public partial class BattleUi : CanvasLayer
     public void SetRecording(bool on)
     {
         Recording = on;
-        if (_recBtn != null && ExeArt.Bmp(on ? 176 : 175) is { } t) _recBtn.TextureNormal = _recBtn.TextureHover = t;
+        if (_recBtn != null && ExeArt.Bmp(on ? 176 : 175) is { } t) { _recBtn.TextureNormal = _recBtn.TextureHover = t; _recBtn.TooltipText = on ? "点击关闭本场战斗录像。" : "点击保存本场战斗录像。"; }
         RecordToggled?.Invoke(on);
     }
+    /// <summary>自动战斗打了几回合（官方 0x4a71f0，开战清零），提示条显示"自动战斗中「第N回合」"（exe 0x47b62c，0x405604 画在提示条 22705 上）。</summary>
+    public int AutoRounds { get; private set; }
+    private int _autoTurn = -1;
+    public void ResetAutoRounds() { AutoRounds = 0; _autoTurn = -1; }
     /// <summary>自动战斗替玩家下指令：走和手动一样的信号，面板照常往下一个指令位走。</summary>
-    public void AutoAct(Command c)
+    public void AutoAct(Command c, int turn = -1)
     {
+        if (turn != _autoTurn) { _autoTurn = turn; AutoRounds++; }
         if (c.Kind is CommandKind.Skill or CommandKind.PetSkill) EmitSignal(SignalName.CommandSkill, (int)c.Kind, c.TargetId, c.Arg, c.Level);
         else if (c.Kind == CommandKind.Item) EmitSignal(SignalName.CommandArg, (int)c.Kind, c.TargetId, c.Arg);
         else if (c.TargetId >= 0) EmitSignal(SignalName.CommandTarget, (int)c.Kind, c.TargetId);
         else EmitSignal(SignalName.CommandChosen, (int)c.Kind);
         CloseSub(); AfterCommand();
+        if (_msg != null) { ShowBar(true); _msg.Text = $"自动战斗中「第{AutoRounds}回合」"; }
     }
     public void SetAuto(bool on)
     {
         AutoOn = on;
-        if (_autoBtn != null && ExeArt.Bmp(on ? 173 : 174) is { } t) _autoBtn.TextureNormal = _autoBtn.TextureHover = t;
+        if (_autoBtn != null && ExeArt.Bmp(on ? 173 : 174) is { } t) { _autoBtn.TextureNormal = _autoBtn.TextureHover = t; _autoBtn.TooltipText = on ? "点击关闭自动战斗(Ctrl+R)。" : "点击开启自动战斗(Ctrl+R)。"; }
         AutoToggled?.Invoke(on);
     }
 

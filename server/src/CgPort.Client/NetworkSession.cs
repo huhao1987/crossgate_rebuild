@@ -342,6 +342,10 @@ public sealed class NetworkSession : IGameSession
             case "murD":  // PLAYSE：服务端让客户端放一个音效（实测 "murD R 0 0"，第 1 段 = 音效号 62 进制）
                 SoundRequested?.Invoke(D62Safe(f[0]));
                 break;
+            case "TFCu":  // SE：系统音效（exe 0x458a7e，查表 0x49a738：0→71 1→72 2→68 3→69 4→68 5→65 6→66 7→67 8→73）
+                if (f.Length > 0 && D62Safe(f[0]) is var sen and >= 0 and < 9)
+                    SoundRequested?.Invoke(new[] { 71, 72, 68, 69, 68, 65, 66, 67, 73 }[sen]);
+                break;
             case "wiB":   // BGMW：服务端换背景音乐（第 1 段 = 音乐号）
                 BgmRequested?.Invoke(D62Safe(f[0]));
                 break;
@@ -476,9 +480,10 @@ public sealed class NetworkSession : IGameSession
                 break;
             case "Sc":    // TITLE：称号列表，每个 3 段：名字|?|?（实测 "见习剑士|2|111|呢喃的歌声|1|7|"）
             {
-                var tp = rest.Split('|'); var list = new List<string>();
-                for (int i = 0; i + 2 < tp.Length; i += 3) if (tp[i].Length > 0) list.Add(Unesc(tp[i]));
-                Titles = list; StatusChanged?.Invoke();
+                // 空的格子也占位（实测删过称号后 "Sc |||水面上的小草|7|6|…"）：列表只放有名字的，另记每个的服务端格号
+                var tp = rest.Split('|'); var list = new List<string>(); var slots = new List<int>();
+                for (int i = 0; i + 2 < tp.Length; i += 3) if (tp[i].Length > 0) { list.Add(Unesc(tp[i])); slots.Add(i / 3); }
+                Titles = list; _titleSlots = slots; StatusChanged?.Invoke();
                 break;
             }
             case "jv":    // CJ：职业名（"1 游民"）
@@ -987,6 +992,8 @@ public sealed class NetworkSession : IGameSession
     {
         /// <summary>家族名（ABI 第 9 段，exe 0x452045 起最多 40 字节；没加入家族是空的）。</summary>
         public string Guild { get; init; } = "";
+        /// <summary>ABI 第 4 段：登录顺序号（名片簿「排列 → 登录顺序」按它排，exe 0x44bc94）。</summary>
+        public int Seq { get; init; }
     }
     public sealed record Mail(int CardIndex, string Name, string Date, string Text, bool Incoming)
     {
@@ -1016,7 +1023,7 @@ public sealed class NetworkSession : IGameSession
         if (idx < 0 || idx >= 60) return;
         if (o + 6 >= p.Length || p[o] != "1" || p[o + 1].Length == 0) { _cards[idx] = null; return; }
         int I(int k) => int.TryParse(p[o + k], out var v) ? v : 0;
-        _cards[idx] = new AddressCard(idx, Unesc(p[o + 1]), Unesc(p[o + 2]), I(4), I(5) != 0, I(6)) { Guild = o + 8 < p.Length ? Unesc(p[o + 8]) : "" };
+        _cards[idx] = new AddressCard(idx, Unesc(p[o + 1]), Unesc(p[o + 2]), I(4), I(5) != 0, I(6)) { Guild = o + 8 < p.Length ? Unesc(p[o + 8]) : "", Seq = I(3) };
     }
 
     private void OnMail(string[] f)
@@ -1181,11 +1188,15 @@ public sealed class NetworkSession : IGameSession
     // 状态窗口「稱號」页：点一行 = zGp 序号（ST，选为特殊称号）；解除 = zGp -1；删除 = tj 序号（DT）；
     // 玩家称号输入框 + 設定 = ACwB 文字（FT）。服务端回 aPc（第 28 项选中序号、第 30 项玩家称号）和 Sc。
     public IReadOnlyList<string> Titles { get; private set; } = Array.Empty<string>();
-    public int TitleIndex { get; private set; } = -1;
+    /// <summary>选中的特殊称号在 Titles 里的序号（-1 没选）；服务端给的是格号，这里换算过。</summary>
+    public int TitleIndex => _titleSlot < 0 ? -1 : _titleSlots.IndexOf(_titleSlot);
+    private int _titleSlot = -1;
+    private List<int> _titleSlots = new();
+    private int SlotOf(int i) => i >= 0 && i < _titleSlots.Count ? _titleSlots[i] : i;
     public string FreeTitle { get; private set; } = "";
     public string SpecialTitle => TitleIndex >= 0 && TitleIndex < Titles.Count ? Titles[TitleIndex] : "";
-    public void SelectTitle(int i) => Send("zGp", i.ToString());
-    public void DeleteTitle(int i) => Send("tj", i.ToString());
+    public void SelectTitle(int i) => Send("zGp", (i < 0 ? -1 : SlotOf(i)).ToString());
+    public void DeleteTitle(int i) => Send("tj", SlotOf(i).ToString());
     public void SetFreeTitle(string text) => Send("ACwB", text.Replace("\\", "\\\\").Replace(" ", "\\S"));
 
     // ———————————————————— 技能导师（官方客户端 bob 实测 2026-11-09）————————————————————
@@ -1506,7 +1517,7 @@ public sealed class NetworkSession : IGameSession
         st.Vit = I(5, st.Vit); st.Str = I(6, st.Str); st.Tgh = I(7, st.Tgh); st.Spd = I(8, st.Spd); st.Mag = I(9, st.Mag);
         st.Endurance = I(10, st.Endurance); st.Dex = I(11, st.Dex); st.Int = I(12, st.Int);
         st.NextExp = I(14, (int)st.NextExp);
-        TitleIndex = I(28, TitleIndex);                       // 选中的特殊称号（Sc 列表的序号，-1 没选；官方实测）
+        _titleSlot = I(28, _titleSlot);                       // 选中的特殊称号（Sc 列表的序号，-1 没选；官方实测）
         if (_cp[30] != null) FreeTitle = Unesc(_cp[30]);       // 玩家称号（自己写的）
         st.Attack = I(16, st.Attack); st.Defense = I(17, st.Defense); st.Agility = I(18, st.Agility);
         st.Spirit = I(19, st.Spirit); st.Recovery = I(20, st.Recovery); st.Charm = I(21, st.Charm);
@@ -1751,6 +1762,10 @@ public sealed class NetworkSession : IGameSession
     private void SendCommand(Command c)
     {
         _awaiting = false; _answeredThisTurn++; _lastCommand = c; CommandSlot = -1;
+        // 轮到宠物时宠物只有"技能"（W|技能|目标）：普通攻击 = 宠物第 0 招「攻击」、防御 = 第 1 招「防御」（官方宠物面板也是这样）。
+        // 发人物的 H|目标 服务端不认，只会再要一次 420。
+        if (PetTurn && c.Kind == CommandKind.Attack) c = new Command(CommandKind.PetSkill, c.TargetId, 0);
+        else if (PetTurn && c.Kind == CommandKind.Guard) c = new Command(CommandKind.PetSkill, c.TargetId, 1);
         switch (c.Kind)
         {
             case CommandKind.Attack:
@@ -2125,7 +2140,11 @@ public sealed class NetworkSession : IGameSession
             int N(int i) => i < q.Length && int.TryParse(q[i], out var v) ? v : 0;
             var common = new { Face = N(0), Npc = T(1), Text = T(2) };
             if (type == 5)
-                page = new DialogPage(common.Text, new List<string>(), false, new List<string> { "买", "卖", "离开" }) { Kind = "shop" };
+            {
+                // 第 4 段是选项掩码（exe 0x4238f4：第 i 项（1 想买 / 2 想卖 / 3 不必了）在 掩码 & i 非 0 时显示；本服给 3 = 三项都有）
+                int opt = q.Length > 3 && int.TryParse(q[3].Trim(), out var mk) ? mk : 7;
+                page = new DialogPage(common.Text, new List<string>(), false, new List<string> { (opt & 1) != 0 ? "想买" : "", (opt & 2) != 0 ? "想卖" : "", (opt & 3) != 0 ? "不必了" : "" }) { Kind = "shop" };
+            }
             else if (type == 6)
             {
                 // 买：…|钱不够的话|背包满的话|然后每件 6 段：名字|图像|单价|说明|?|一次最多几个

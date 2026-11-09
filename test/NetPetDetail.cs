@@ -28,6 +28,7 @@ public partial class NetPetDetail : SceneTree
         {
             case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90 && s.Player.Pets.Count >= 2:
                 s.Say("/dolua gm_petclear.lua"); s.SetPetState(0, PetInfo.Battle); s.Say("/dolua gm_petpoints.lua"); _st = 1; _f = 0; break;
+            case 1 when _f == 45: s!.SetPetState(1, PetInfo.Standby); break;   // 树精先待命（下面测 待命 → 战斗）
             case 1 when _f == 90:
                 _m.HudSkin.MenuPressed!(4); _st = 2; _f = 0; break;
             case 2 when _f == 20:
