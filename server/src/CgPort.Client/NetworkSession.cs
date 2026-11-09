@@ -194,6 +194,23 @@ public sealed class NetworkSession : IGameSession
     private static string B62(long v) => CgPort.Protocol.Base62.Encode(v);
     private static int D62(string s) => (int)CgPort.Protocol.Base62.Decode(s);
     private static int Hex(string s) => int.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out var v) ? v : 0;
+    /// <summary>窗口文字的一层转义（exe 0x478b4f）：\\y → \\、\\c → ,、\\z → |、\\n → 换行；套了几层就解几层。</summary>
+    private static string UnescText(string s)
+    {
+        for (int round = 0; round < 3 && s.Contains('\\'); round++)
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < s.Length; i++)
+            {
+                if (s[i] == '\\' && i + 1 < s.Length && "yczn".Contains(s[i + 1]))
+                { sb.Append(s[i + 1] switch { 'y' => '\\', 'c' => ',', 'z' => '|', _ => '\n' }); i++; }
+                else sb.Append(s[i]);
+            }
+            if (sb.ToString() == s) break;
+            s = sb.ToString();
+        }
+        return s;
+    }
     private static string Unesc(string s) => s.Replace("\\S", " ").Replace("\\\\c", ",").Replace("\\c", ",").Replace("\\\\n", "\n").Replace("\\n", "\n");
 
     // ———————————————————— 封包处理 ————————————————————
@@ -2172,6 +2189,48 @@ public sealed class NetworkSession : IGameSession
             }
             page = page with { NpcName = common.Npc, Face = common.Face };
         }
+        else if (type == 21)
+        {
+            // 留言板（Dengon，exe 0x4210d9 读、0x42b2eb 画）：标题|然后 4 条，每条 5 段 头像|时间(unix 秒)|能不能删(0/1)|名字|内容。
+            // 按钮掩码 0x10 = 有上一页、0x20 = 有下一页。
+            var q = string.Join(' ', f.Skip(4)).Split("\\\\z");
+            if (q.Length < 4) q = string.Join(' ', f.Skip(4)).Split('|');
+            // 内容服务端原样存的是转义过的（"a\\cb"），再转义一层发来；官方客户端只解一层，所以会把 \\c 原样显示出来——这里解到底，显示原意
+            string T(int i) => i < q.Length ? UnescText(q[i].Replace("\\S", " ").Replace("\\\\", "\\")) : "";
+            long L(int i) => i < q.Length && long.TryParse(q[i].Trim(), out var v) ? v : 0;
+            var list = new List<ShopEntry>();
+            for (int k = 0; k < 4; k++)
+            {
+                int i = 1 + 5 * k;
+                list.Add(new ShopEntry(T(i + 3), (int)L(i), (int)Math.Min(int.MaxValue, L(i + 1)), T(i + 4), (int)L(i + 2)));
+            }
+            page = new DialogPage("", WindowText.ButtonNames(mask), false) { Kind = "board", Shop = list, NpcName = T(0) };
+        }
+        else if (type is 24 or 25 or 26)
+        {
+            // 宠物技能店（Techshop，exe 读 0x420092 / 0x42053c / 0x4206d5，画 0x427a14 / 0x427fce / 0x42849d）：
+            //  24 选技能：头像|NPC名|话|钱不够的话|没宠物的话|每个 4 段 名字|耗魔|价钱|说明 → 回 "序号"（从 0）
+            //  25 选宠物：头像|NPC名|话|要求等级|每只 3 段 名字|等级|技能栏数（最多 5 只）→ 回 "序号"
+            //  26 选栏位：头像|NPC名|话|每栏 3 段 技能名|等级|说明（空 = 空栏位）→ 确认后回 "栏位序号"
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n").Trim('\n') : "";
+            int N(int i) => i < q.Length && int.TryParse(q[i].Trim(), out var v) ? v : 0;
+            var list = new List<ShopEntry>();
+            if (type == 24)
+                for (int i = 5; i + 3 < q.Length + 1 && list.Count < 40; i += 4)
+                { if (T(i).Length == 0) break; list.Add(new ShopEntry(T(i), N(i + 1), N(i + 2), T(i + 3))); }
+            else if (type == 25)
+                for (int i = 4, k = 0; i + 2 < q.Length + 1 && k < 5; i += 3, k++)
+                { if (T(i).Length > 0) list.Add(new ShopEntry(T(i), 0, 0, "", N(i + 1), k, N(i + 2))); }
+            else
+                for (int i = 3; i + 2 < q.Length + 1 && list.Count < 10; i += 3)
+                    list.Add(new ShopEntry(T(i), N(i + 1), 0, T(i + 2)));
+            page = new DialogPage(T(2), new List<string> { "cancel" }, false)
+            {
+                Kind = type == 24 ? "petskill" : type == 25 ? "petpick" : "petslot", Shop = list, NpcName = T(1), Face = N(0),
+                AltTexts = type == 24 ? new[] { T(3), T(4) } : null, SourceItem = type == 25 ? N(3) : 0,
+            };
+        }
         else if (type == 28)
         {
             // 兑换（Brushman「想交易」之后，exe 0x420881 读、0x428ff6 画）：头像|NPC名|话|数量不足的话|物品栏满的话|拿来换的道具编号|它的名字|
@@ -2264,6 +2323,17 @@ public sealed class NetworkSession : IGameSession
         Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, btn, sel);
         DialogChanged?.Invoke(null);   // 服务端如果还有下一页，会再发 BZ
     }
+    /// <summary>关掉窗口、不发包（官方取消 / 不再留言都是这样）。</summary>
+    public void WindowClose() { _window = null; DialogChanged?.Invoke(null); }
+    /// <summary>窗口还开着的时候发一次（留言板：留言 / 删除 / 翻页；服务端会重发整个窗口）。</summary>
+    public void WindowSend(int buttonBits, string data)
+    {
+        if (_window is not { } w) return;
+        Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, B62(buttonBits), data);
+    }
+    /// <summary>窗口数据里的文字转义（exe 0x478bbb：\ → \y、| → \z、, → \c、换行 → \n），再按传输层把 \ 写成 \\、空格写成 \S。</summary>
+    public static string WindowEscape(string s) =>
+        s.Replace("\\", "\\y").Replace("|", "\\z").Replace(",", "\\c").Replace("\n", "\\n").Replace("\\", "\\\\").Replace(" ", "\\S");
     /// <summary>按一个按钮同时带数据（输入窗口：确定 + 输入的文字）。</summary>
     public void AnswerWith(string button, string data)
     {

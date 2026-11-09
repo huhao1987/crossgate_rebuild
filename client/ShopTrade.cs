@@ -72,8 +72,8 @@ public partial class ShopTradeWindow : CgWindow
         // 对话框：鼠标停在道具上显示道具说明，否则显示这一句
         var said = _hover >= 0 && _hover < list.Count ? list[_hover].Name + "\n" + list[_hover].Desc
             : _msg == 0 || _page.AltTexts == null ? _page.Text : _page.AltTexts[_msg - 1];
-        // 鉴定 / 修理的话是客户端自己的（开头带空行，官方照样空一行）
-        var lines = said.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 || (Picking && _hover < 0)).SelectMany(l => l.Length == 0 ? new List<string> { "" } : ShopMenuWindow.Wrap(l, 26)).Take(_hover >= 0 ? 8 : 5).ToList();
+        // 话按 20 字节折行（exe 0x40f581 用的 [0x119e9f4]，商店入口读完就设成 0x14）；鉴定 / 修理的话是客户端自己的（开头带空行，官方照样空一行）
+        var lines = said.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 || (Picking && _hover < 0)).SelectMany(l => l.Length == 0 ? new List<string> { "" } : ShopMenuWindow.Wrap(l, 20)).Take(_hover >= 0 ? 8 : 5).ToList();
         for (int k = 0; k < lines.Count; k++) Txt(lines[k], 378, 54 + 21 * k, Colors.White);
         if (_page.Face > 0)
         {

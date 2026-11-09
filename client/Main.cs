@@ -161,6 +161,10 @@ public partial class Main : Node2D
     private DialogPanel _dialog = null!;
     private ShopTradeWindow _shop = null!;
     private HealWindow _heal = null!;
+    private BoardWindow _board = null!;
+    private PetSkillShopWindow _petShop = null!;
+    public PetSkillShopWindow PetShop => _petShop;
+    public BoardWindow Board => _board;
     public HealWindow Heal => _heal;
     public ShopTradeWindow Shop => _shop;
     private BagPanel _bag = null!;
@@ -308,11 +312,13 @@ public partial class Main : Node2D
         _session.RewardsGained += OnRewards;
         _session.DialogChanged += p =>
         {
-            bool heal = p?.Kind == "heal", shop = p?.Shop != null && !heal, menu = p?.Kind is "shop" or "skillmenu" or "trademenu";
+            bool heal = p?.Kind == "heal", board = p?.Kind == "board", petShop = p?.Kind is "petskill" or "petpick" or "petslot", shop = p?.Shop != null && !heal && !board && !petShop, menu = p?.Kind is "shop" or "skillmenu" or "trademenu";
             _shop.ShowPage(shop ? p : null);
             _heal.ShowPage(heal ? p : null);
+            _board.ShowPage(board ? p : null);
+            _petShop.ShowPage(petShop ? p : null);
             _shopMenu.ShowPage(menu ? p : null);
-            _dialog.ShowPage(_talkingTo, shop || menu || heal ? null : p);
+            _dialog.ShowPage(_talkingTo, shop || menu || heal || board || petShop ? null : p);
             if (p == null) AutoSave();
         };
         _session.StatusChanged += () =>
@@ -531,10 +537,15 @@ public partial class Main : Node2D
         // 商店买 / 卖（官方专用窗口，见 ShopTrade.cs）；「取消」官方不发包，只关窗口
         _shop = new ShopTradeWindow { Cache = _cache, StandAct = _cfg.ActStand, Gold = () => _session.Player.Gold, FreeSlots = () => 20 - _session.Player.Items.Count(i => i.Slot is >= 8 and < 28) };
         _shop.CountOf = id => _session.Player.Items.Where(i => i.ItemId == id && i.Slot is >= 8 and < 28).Sum(i => Math.Max(1, i.Count));
-        _shop.Submit = a => { if (a != "cancel") _session.Answer(a); };
+        _shop.Submit = a => { if (a != "cancel") _session.Answer(a); else (_session as NetworkSession)?.WindowClose(); };
         _heal = new HealWindow { Cache = _cache, Gold = () => _session.Player.Gold };
-        _heal.Submit = a => { if (a != "cancel") _session.Answer("data:" + a); };
+        _heal.Submit = a => { if (a != "cancel") _session.Answer("data:" + a); else (_session as NetworkSession)?.WindowClose(); };
         AddChild(_heal);
+        _board = new BoardWindow { Cache = _cache, Session = () => _session as NetworkSession };
+        AddChild(_board);
+        _petShop = new PetSkillShopWindow { Cache = _cache, StandAct = _cfg.ActStand, Gold = () => _session.Player.Gold, HasPet = () => _session.Player.Pets.Count > 0 };
+        _petShop.Submit = a => { if (a == "cancel") (_session as NetworkSession)?.WindowClose(); else _session.Answer("data:" + a); };
+        AddChild(_petShop);
         AddChild(_shop);
         _shopMenu = new ShopMenuWindow { Cache = _cache, StandAct = _cfg.ActStand, Choose = i => _session.Answer($"opt:{i}") };
         AddChild(_shopMenu);
