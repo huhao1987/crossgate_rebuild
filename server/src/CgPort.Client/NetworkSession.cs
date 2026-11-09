@@ -1648,9 +1648,59 @@ public sealed class NetworkSession : IGameSession
         // ITM 段（官方实测，2026-11-07）：
         //   用药   ITM|e0|r使用者|0|目标|d回复量|       （例 ITM|e0|r5|0|5|d48）
         //   封印卡 ITM|e6|a使用者|d目标|结果|           （结果 1 = 抓到，敌人被收走；0 = 没抓到）
-        int i = 0;
+        int i = 0, combo = 0;
         while (i < tok.Length)
         {
+            // 合击（官方实测）：CMB|d目标|a攻击者|f标志|d伤害|（a|f|d 每个攻击者重复）|FF
+            if (tok[i] == "CMB" && i + 1 < tok.Length && tok[i + 1].StartsWith('d'))
+            {
+                int tg = Hex(tok[i + 1][1..]); combo++;
+                int k = i + 2;
+                for (; k + 2 < tok.Length && tok[k].StartsWith('a') && tok[k + 1].StartsWith('f') && tok[k + 2].StartsWith('d'); k += 3)
+                {
+                    int actor = Hex(tok[k][1..]); long fl = Hex(tok[k + 1][1..]); int dmg = Hex(tok[k + 2][1..]);
+                    bool killed = (fl & 0x20) != 0; if (killed) _down.Add(tg);
+                    ev.Add(new BattleEvent(_turn, actor, CommandKind.Attack, tg, dmg, dmg == 0, killed, false, Combo: _turn * 100 + combo));
+                }
+                i = k; continue;
+            }
+            // 逃跑：ESC|e单位|f成功(1)/失败(0)
+            if (tok[i] == "ESC" && i + 2 < tok.Length && tok[i + 1].StartsWith('e') && tok[i + 2].StartsWith('f'))
+            {
+                int who = Hex(tok[i + 1][1..]); bool ok = tok[i + 2] == "f1";
+                ev.Add(new BattleEvent(_turn, who, CommandKind.Escape, -1, 0, false, false, ok));
+                i += 3; continue;
+            }
+            // 战斗中的系统话：CHT|?|?|?|?|文字（"hao逃跑了。"之类）
+            if (tok[i] == "CHT" && i + 5 < tok.Length)
+            {
+                ev.Add(new BattleEvent(_turn, -1, CommandKind.Wait, -1, 0, false, false, false, Text: Unesc(tok[i + 5])));
+                i += 6; continue;
+            }
+            // 宠物进出场：MON|m主人|0|p栏位（收回）；MON|m主人|1|p栏位|名字|形象|等级|HP|最大HP|MP|最大MP|旗标（召唤）
+            if (tok[i] == "MON" && i + 3 < tok.Length && tok[i + 1].StartsWith('m') && tok[i + 3].StartsWith('p'))
+            {
+                int owner = Hex(tok[i + 1][1..]), slot = Hex(tok[i + 3][1..]); bool call = tok[i + 2] == "1";
+                if (call && i + 5 < tok.Length)
+                {
+                    ev.Add(new BattleEvent(_turn, owner, CommandKind.Summon, slot, 1, false, false, false, TechId: Hex(tok[i + 5]), Text: Unesc(tok[i + 4])));
+                    i += 12; continue;
+                }
+                ev.Add(new BattleEvent(_turn, owner, CommandKind.Summon, slot, 0, false, false, false));
+                i += 4; continue;
+            }
+            // 换武器：EQU|单位|新形象|新形象
+            if (tok[i] == "EQU" && i + 2 < tok.Length)
+            {
+                ev.Add(new BattleEvent(_turn, Hex(tok[i + 1]), CommandKind.Weapon, -1, 0, false, false, false, TechId: Hex(tok[i + 2])));
+                i += 4; continue;
+            }
+            // 换位置（前后排对调）：POS|单位
+            if (tok[i] == "POS" && i + 1 < tok.Length)
+            {
+                ev.Add(new BattleEvent(_turn, Hex(tok[i + 1]), CommandKind.Position, -1, 0, false, false, false));
+                i += 2; continue;
+            }
             if (tok[i] == "ITM" && i + 1 < tok.Length)
             {
                 var kind = tok[i + 1];

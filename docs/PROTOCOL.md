@@ -503,3 +503,12 @@ rU 第 8 段 = 道具等级。
 - 官方根本没有处理代码的：GD、GML、RGM、GMI、GM、GT、GC、IA(ELoy)、kiG、TgX。
 - ALN = `Dn 图鉴编号|文字`：把文字存进第 n 个图鉴条目（0x1263438 + (n−1)×0xd4）；EV = `EZ a b`：a 等于客户端等待中的事件编号、b = 0 时解除等待（0x45423f）；
   RD = `hB …`（0x4594c4 起，按 | 拆）。这三个本服从没发过（翻遍 cgmsv/log 的 [Send]），移植暂不处理。
+
+## 战斗动作脚本的其它命令（M|…，exe 命令名表在 0x47b2d8 起：END RID GMN BST REB PDN CBC PLV PNO CHT CFP ACT PUE PSN CMB ITM EQU MON POS SUP CLR ESC SKL）
+- 本服实际发过的（翻 cgmsv/log）：SKL、ACT、END、ITM、CHT、ESC、CMB、MON、EQU、SUP、POS。移植现在解析：
+  - `CMB|d目标|a攻击者|f标志|d伤害|…|FF` 合击：几个人同时冲上去打同一个目标（标志 0x20 = 打倒）。
+  - `ESC|e单位|f1/f0` 逃跑成功 / 失败。
+  - `CHT|?|?|?|?|文字` 战斗中的系统话（"xx逃跑了。"），显示在战斗消息栏。
+  - `MON|m主人|0|p栏` 收回宠物；`MON|m主人|1|p栏|名字|形象|等级|HP|最大HP|MP|最大MP|旗标` 召唤宠物（新单位从下一次 C| 列表加进战场）。
+  - `EQU|单位|新形象|新形象` 战斗中换武器，形象跟着换。`POS|单位` 换前后排（位置由下一次单位列表校正）。
+- 还没解析：SUP（`SUP|单位|FF`，意义未明）以及本服没发过的 RID GMN BST REB PDN CBC PLV PNO CFP PUE PSN CLR。

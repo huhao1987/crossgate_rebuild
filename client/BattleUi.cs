@@ -45,6 +45,7 @@ public partial class BattleUi : CanvasLayer
         public Vector2 Home;
         public bool Down;
         public int Status;
+        public string Name = "";
         public AnimSprite? Ailment, Buff;
     }
     private readonly Dictionary<int, Unit> _units = new();
@@ -141,7 +142,7 @@ public partial class BattleUi : CanvasLayer
         var tag = NameTag.Make(name, u.Side == 0 ? NameTag.PlayerColor : NameTag.NpcColor, -92);
         s.AddChild(bar); s.AddChild(tag);
         _stage.AddChild(s);
-        _units[u.Id] = new Unit { Id = u.Id, Side = u.Side, MaxHp = u.MaxHp, Hp = u.Hp, Level = u.Level, Sprite = s, Bar = bar, Tag = tag, Home = pos, Down = !u.Alive };
+        _units[u.Id] = new Unit { Id = u.Id, Side = u.Side, MaxHp = u.MaxHp, Hp = u.Hp, Level = u.Level, Sprite = s, Bar = bar, Tag = tag, Home = pos, Down = !u.Alive, Name = u.Name };
         SetStatus(_units[u.Id], u.Status);
     }
 
@@ -713,7 +714,7 @@ public partial class BattleUi : CanvasLayer
     }
 
     public int PlayerId => _playerId;
-    private string Name(int id) => id == _playerId ? "你" : $"敌人{id}";
+    private string Name(int id) => id == _playerId ? "你" : _units.TryGetValue(id, out var u) && u.Name.Length > 0 ? u.Name : $"敌人{id}";
 
     private void Say(string line)
     {
@@ -732,8 +733,11 @@ public partial class BattleUi : CanvasLayer
             int j = i + 1;
             if (list[i].Kind is CommandKind.Skill or CommandKind.PetSkill)
                 while (j < list.Count && list[j].Kind == list[i].Kind && list[j].ActorId == list[i].ActorId && list[j].TechId == list[i].TechId && list[j].Magic == list[i].Magic) j++;
+            else if (list[i].Combo != 0)
+                while (j < list.Count && list[j].Combo == list[i].Combo) j++;
             var group = list.GetRange(i, j - i);
-            Enqueue(() => group.Count == 1 && group[0].Kind is not (CommandKind.Skill or CommandKind.PetSkill) ? PlayEvent(group[0]) : PlaySkill(group));
+            if (group[0].Combo != 0) Enqueue(() => PlayCombo(group));
+            else Enqueue(() => group.Count == 1 && group[0].Kind is not (CommandKind.Skill or CommandKind.PetSkill) ? PlayEvent(group[0]) : PlaySkill(group));
             i = j;
         }
         Enqueue(() => { Sync(v); return Task.CompletedTask; });
@@ -785,6 +789,14 @@ public partial class BattleUi : CanvasLayer
     /// <summary>回合结束后用服务端的状态校正血量（以服务端为准）。</summary>
     private void Sync(BattleView v)
     {
+        // 战斗中新出现的单位（召唤出来的宠物等）补上
+        foreach (var u in v.Units.Where(u => !_units.ContainsKey(u.Id) && u.Alive))
+        {
+            int dir = u.Side == 0 ? Iso.AnimeDirFor(0, -1, Cfg.DirOffset) : Iso.AnimeDirFor(0, 1, Cfg.DirOffset);
+            AddUnit(u, SlotPos(u.Id), dir);
+            var nu = _units[u.Id]; nu.Sprite.Modulate = new Color(1, 1, 1, 0);
+            nu.Sprite.CreateTween().TweenProperty(nu.Sprite, "modulate:a", 1.0, 0.4);
+        }
         foreach (var u in v.Units)
             if (_units.TryGetValue(u.Id, out var x))
             {
@@ -796,9 +808,26 @@ public partial class BattleUi : CanvasLayer
         UpdateStatus(v.Turn);
     }
 
+    public int CombosShown { get; private set; }
+    public bool HasUnit(int id) => _units.ContainsKey(id);
+    public int SummonsShown { get; private set; }
+
+    /// <summary>合击（CMB）：几个人一起冲上去打同一个目标（官方是同时出手）。</summary>
+    private async Task PlayCombo(List<BattleEvent> group)
+    {
+        CombosShown++; PlayedEvents += group.Count;
+        if (!_units.TryGetValue(group[0].TargetId, out var t)) return;
+        var tasks = new List<Task>();
+        foreach (var e in group) if (_units.TryGetValue(e.ActorId, out var a)) tasks.Add(PlayAttack(a, t, e));
+        await Task.WhenAll(tasks);
+        Say($"合击！{string.Join("、", group.Select(e => Name(e.ActorId)).Distinct())} 对 {Name(t.Id)} 造成 {group.Sum(e => e.Damage)} 点伤害" + (group.Any(e => e.Killed) ? "，击倒！" : ""));
+    }
+
     private async Task PlayEvent(BattleEvent e)
     {
         PlayedEvents++;
+        // 不需要行动者的：战斗中的系统话（CHT）
+        if (e.Kind == CommandKind.Wait && e.Text != null) { Say(e.Text); await Wait(0.3); return; }
         if (!_units.TryGetValue(e.ActorId, out var a)) return;
         switch (e.Kind)
         {
@@ -822,6 +851,27 @@ public partial class BattleUi : CanvasLayer
                     a.Sprite.Visible = false;
                 }
                 else { Float(a, "失败", Colors.Gray); await Wait(0.45); }
+                break;
+            case CommandKind.Summon:
+            {
+                // MON：召唤（Damage 1）新宠物从下一次单位列表里加进来；收回（0）就把主人前 / 后一格的宠物淡出
+                SummonsShown++;
+                if (e.Damage == 1) { Say($"{Name(e.ActorId)} 召唤了 {e.Text}"); await Wait(0.4); break; }
+                int petId = e.ActorId + (e.ActorId % 10 >= 5 ? -5 : 5);
+                if (_units.TryGetValue(petId, out var pet) && pet.Sprite.Visible)
+                {
+                    Say($"{Name(e.ActorId)} 收回了 {Name(petId)}");
+                    await TweenTo(pet.Sprite, "modulate:a", 0.0f, 0.4);
+                    pet.Sprite.Visible = false; pet.Bar.Visible = false; pet.Tag.Visible = false;
+                    _units.Remove(petId);
+                }
+                break;
+            }
+            case CommandKind.Weapon:
+                // EQU：战斗中换武器，形象跟着换
+                if (e.TechId > 0) a.Sprite.AnimeId = e.TechId;
+                Say($"{Name(e.ActorId)} 更换了武器");
+                await Wait(0.3);
                 break;
             case CommandKind.Item when e.Sealed != null && _units.TryGetValue(e.TargetId, out var st):
                 await PlaySeal(a, st, e.Sealed.Value);
@@ -1115,6 +1165,8 @@ public partial class BattleUi : CanvasLayer
         s.PlayOnce(act, () => tcs.TrySetResult(), hold);
         // 动画速度不随 Speed 变化，测试加速时用定时器兜底
         if (Speed > 1.5f) GetTree().CreateTimer(1.5 / Speed).Timeout += () => tcs.TrySetResult();
+        // 同一个单位同时被两个动作播（合击时几个人一起打同一个目标），后一个会把前一个的完成回调顶掉——兜底 2.5 秒
+        else GetTree().CreateTimer(2.5).Timeout += () => tcs.TrySetResult();
         return tcs.Task;
     }
 
