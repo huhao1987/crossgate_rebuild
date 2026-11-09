@@ -38,6 +38,9 @@ public partial class Main : Node2D
     public ItemPanel ItemWin => _items;
     public PetListWindow Pets => _pets;
     public Hud HudSkin => _hudSkin;
+    public GameConfig Cfg => _cfg;
+    /// <summary>测试用：周围对象身上显示的名字标签数。</summary>
+    public int VisibleNameTags() => _npcNodes.Count(n => IsInstanceValid(n) && n.GetChildren().OfType<Label>().Any());
     public SystemPanel SystemWin => _system;
     public ChatLog Chat => _chat;
     private TradePicker _tradePicker = null!;
@@ -211,7 +214,7 @@ public partial class Main : Node2D
         };
         _session.ObjectsChanged += SpawnNpcs;
         if (_session is NetworkSession nsg) nsg.GroundChanged += SpawnGround;
-        if (_session is NetworkSession nsm) nsm.ObjectMoved += OnObjectMoved;
+        if (_session is NetworkSession nsm) { nsm.ObjectMoved += OnObjectMoved; nsm.ObjectActed += OnObjectActed; nsm.FightingChanged += SpawnNpcs; }
 
         _player = new AnimSprite { Cache = _cache, AnimeId = _cfg.PlayerAnime, Act = _cfg.ActStand, FallbackAct = _cfg.ActStand, Dir = 4 };
         _player.AddChild(_cam);
@@ -230,10 +233,13 @@ public partial class Main : Node2D
         _hudSkin.ButtonPressed += id =>
         {
             if (_session is not NetworkSession ns) return;
-            if (id == 22585) ns.PartyButton();
+            if (id == 22581) ns.Duel();
+            else if (id == 22583) ns.Watch();
+            else if (id == 22585) ns.PartyButton();
             else if (id == 22587) ns.ExchangeCard();
             else if (id == 22589) ns.RequestTrade();
             else if (id == 244003) ToggleStall();
+            else if (id == 22591) ToggleEmote();
         };
         // 名片簿 / 写信 / 邮件记录 / 删除确认
         _cardBook = new CardBookWindow { Cache = _cache, Session = () => _session as NetworkSession };
@@ -267,7 +273,7 @@ public partial class Main : Node2D
             nsI.ItemMemberRequested += names => { _items.Visible = false; _itemMember.Show(names); };   // 官方：物品窗口这时关掉
             _itemMember.Picked += i => nsI.SelectItemMember(i);
             nsI.ItemTargetRequested += list => _itemTarget.Show(list);
-            _itemTarget.Picked += c => nsI.UseItemOn(c);
+            _itemTarget.Picked += c => { if (nsI.Treating && _prod != null) _prod.TreatName = _itemTarget.Shown.FirstOrDefault(t => t.Code == c)?.Name ?? ""; nsI.UseItemOn(c); };
             _itemTarget.Back += () => _itemMember.Show(nsI.ItemMembers());
         }
         _prod = new ProductionUi { Cache = _cache, Session = () => _session as NetworkSession, PlayerAnime = () => _player.AnimeId };
@@ -371,14 +377,15 @@ public partial class Main : Node2D
         _skills = new SkillPanel { Cache = _cache, Player = () => _session.Player };
         _skills.TechChosen = (sk, t) => _prod?.UseTech(sk, t);
         AddChild(_skills);
-        _system = new SystemPanel { Cache = _cache };
+        _system = new SystemPanel { Cache = _cache, Cfg = _cfg, Toast = t => _toast.Show(t, 2), DrawChanged = SpawnNpcs };
         _system.Chosen += k =>
         {
             switch (k)
             {
                 case 0: _system.Visible = false; (_session as NetworkSession)?.Logout(); AddChild(new SetupScreen { Layer = 50 }); break;
                 case 1: _chat.MaxLines = _chat.MaxLines >= 6 ? 2 : _chat.MaxLines + 2; _toast.Show($"聊天显示 {_chat.MaxLines} 行", 2); break;
-                case 6: _system.Visible = false; AddChild(new SetupScreen { Layer = 50, FromGame = true }); break;   // 高级设定：界面模式、显示帧数、服务器（官方这一项的内容还没做）
+                case 2 or 3 or 4 or 5: _system.Open(k); break;   // 音樂 / 滑鼠 / 鍵盤 / 繪圖設定
+                case 7: _system.Visible = false; AddChild(new SetupScreen { Layer = 50, FromGame = true }); break;   // 高级设定：界面模式、显示帧数、服务器（官方这一项的内容还没做）
                 default: _toast.Show("这项设定还没做", 2); break;
             }
         };
@@ -542,7 +549,15 @@ public partial class Main : Node2D
             if (node == null) continue;
             // 静态图像的名字放在图像上方，动画角色用固定高度
             float top = node is Sprite2D { Texture: not null } sp && node is not AnimSprite ? sp.Offset.Y - 14 : -92;
-            if (!string.IsNullOrEmpty(n.Name)) node.AddChild(NameTag.Make(n.Name, NameTag.NpcColor, top));
+            bool isPlayer = _session is NetworkSession nsp && nsp.IsPlayerObj(n.Id);
+            if (isPlayer && _cfg.HidePlayers) node.Visible = false;   // 系统 → 绘图设定 → 隐藏画面角色
+            if (!string.IsNullOrEmpty(n.Name) && (isPlayer || _cfg.ShowNpcNames)) node.AddChild(NameTag.Make(n.Name, NameTag.NpcColor, top));
+            // 战斗中：头上 Battle 标志（官方是动画，素材里没找到；用对战按钮的剑 22581 + 橙字 Battle 代替）
+            if (_session is NetworkSession nsf && nsf.IsFighting(n.Id))
+            {
+                if (_cache.ImageNo(22581).Tex is { } sw) node.AddChild(new Sprite2D { Texture = sw, Centered = false, Position = new Vector2(-14, top - 30), ZIndex = 50 });
+                node.AddChild(NameTag.Make("Battle", new Color(1f, 0.45f, 0.1f), top + 12));
+            }
             // 摆摊中：头上"店铺 贩售中"牌子 98895（名字上方），名字下面橙字"玩家店铺"（官方实测）
             if (_session is NetworkSession nss && nss.IsStall(n.Id))
             {
@@ -557,6 +572,43 @@ public partial class Main : Node2D
 
     private readonly Dictionary<int, (Node2D Node, Npc Npc)> _npcById = new();
     private StallWindow _stall = null!;
+    private EmoteWindow? _emote;
+    public EmoteWindow? EmoteUi => _emote;
+    public AnimSprite? SpriteOf(int id) => _npcById.TryGetValue(id, out var e) ? e.Node as AnimSprite : null;
+
+    /// <summary>「動作」按钮 / Ctrl+F：动作窗口（贴右，跟地图、物品同一侧）。</summary>
+    public void ToggleEmote()
+    {
+        if (_session is not NetworkSession ns || _session.InBattle) return;
+        if (_emote == null)
+        {
+            _emote = new EmoteWindow { Cache = _cache };
+            AddChild(_emote);
+            _emote.Chosen = code => { ns.Emote(code); PlayEmote(_player, code); };
+        }
+        _emote.Toggle();
+    }
+
+    /// <summary>
+    /// 播动作（自己点的、或别人 NI 来的）：30 走路 / 3 跑 一直播；31 站立；10 倒下、11 坐下 停在最后一帧；其他播一次回站立。走路时恢复。
+    /// </summary>
+    private void PlayEmote(AnimSprite a, int code)
+    {
+        a.ResetLoop();
+        switch (code)
+        {
+            case 31: a.Act = _cfg.ActStand; break;
+            case 30: a.Act = _cfg.ActWalk; break;
+            case 3: a.Act = 3; break;
+            case 10 or 11: a.PlayOnce(code, hold: true); break;
+            default: if (code is > 0 and <= 20) a.PlayOnce(code); break;
+        }
+    }
+
+    private void OnObjectActed(int id, int code)
+    {
+        if (_npcById.TryGetValue(id, out var e) && IsInstanceValid(e.Node) && e.Node is AnimSprite a) PlayEmote(a, code);
+    }
     public StallWindow StallUi => _stall;
 
     /// <summary>右上第 6 个按钮 / Ctrl+B：打开自己的摆摊窗口（再按关掉）。</summary>
@@ -577,6 +629,7 @@ public partial class Main : Node2D
         var to = Iso.ToScreen(n.X, n.Y);
         if (e.Node is AnimSprite a)
         {
+            a.ResetLoop();
             a.Dir = ((n.Dir % 8) + 8) % 8;
             a.Act = _cfg.ActWalk;
         }
@@ -659,6 +712,7 @@ public partial class Main : Node2D
     {
         if (_session.InBattle || _session.InDialog || _view == null || !_view.Map.InBounds(target.X, target.Y)) return;
         if (!keepTalkTarget) _talkTarget = null;
+        _player.ResetLoop();   // 坐下 / 倒下（動作）走路就恢复
         _prod?.Interrupt();   // 官方：走路就停止采集 / 制造
         _walkTarget = target;
         _pendingSteps.Clear();
@@ -731,7 +785,7 @@ public partial class Main : Node2D
     private bool _rightCovered, _leftCovered;
     private void UpdateCovered()
     {
-        bool c = (_mapWin?.Visible ?? false) || (_items?.Visible ?? false) || (_gold?.Visible ?? false);
+        bool c = (_mapWin?.Visible ?? false) || (_items?.Visible ?? false) || (_gold?.Visible ?? false) || (_emote?.Visible ?? false) || (_prod?.ItemSkill.Visible ?? false) || (_prod?.Materials.Visible ?? false);
         if (c != _rightCovered) { _rightCovered = c; _hudSkin?.SetRightCovered(c); }
         bool l = (_status?.Visible ?? false) || (_skills?.Visible ?? false) || (_system?.Visible ?? false)
               || (_pets?.Visible ?? false) || (_petDetail?.Visible ?? false)
@@ -751,7 +805,10 @@ public partial class Main : Node2D
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.L } && _session is NetworkSession nsl) nsl.PartyButton();   // 官方 Ctrl+L 组队
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.Semicolon } && _session is NetworkSession nsc) nsc.ExchangeCard();   // 官方 Ctrl+; 交换名片
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.Apostrophe } && _session is NetworkSession nst) nst.RequestTrade();   // 官方 Ctrl+' 交易
+        else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.J } && _session is NetworkSession nsj) nsj.Duel();    // 官方 Ctrl+J 对战
+        else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.K } && _session is NetworkSession nsk) nsk.Watch();   // 官方 Ctrl+K 观战
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.B }) ToggleStall();   // 官方 Ctrl+B 摆摊
+        else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.F }) ToggleEmote();   // 官方 Ctrl+F 情绪动作
         else if (e is InputEventKey ck && _chatIn != null && _chatIn.TryStart(ck)) GetViewport().SetInputAsHandled();   // 直接打字 = 聊天（官方同）
         else if (e is InputEventKey { Pressed: true, Keycode: Key.F2 }) _calib?.Toggle();
         else if (e is InputEventKey { Pressed: true, Keycode: Key.F10 }) AddChild(new SetupScreen { Layer = 50 });   // 重新设置（切换单机/联网、改服务器）

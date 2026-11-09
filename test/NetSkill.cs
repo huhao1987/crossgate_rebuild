@@ -29,11 +29,12 @@ public partial class NetSkill : SceneTree
         {
             // 等宠物数据到了（IsSy 比进图晚），第一只不是战斗就设成战斗（NetE2E 会把它改回待命）
             case 0 when s?.InGame == true && s.CurrentMap != null && s.Player.Pets.Count > 0 && _petSet == 0:
-                if (!s.Player.Pets.Any(p => p.State == 2)) s.SetPetState(0, CgPort.Server.PetInfo.Battle);
+                // 每次都设一次：刚抓到的宠物 IsSy 状态是 2，但服务端的出战宠物可能没设（NetSeal 抓的迷你蝙蝠）
+                s.SetPetState(s.Player.Pets[0].Slot, CgPort.Server.PetInfo.Battle);
                 _petSet = _f; break;
             case 0 when s?.InGame == true && _petSet > 0 && _f > _petSet + 60 && s.Player.Pets.Any(p => p.State == 2):
                 Check(s.Player.Skills.Count >= 4 && s.Player.Pets.Any(p => p.State == 2), $"登录后有技能 {s.Player.Skills.Count} 个、战斗宠物 {s.Player.Pets.FirstOrDefault(p => p.State == 2)?.Name}");
-                s.Say("/warp 100 0 370 180"); _st = 1; _f = 0; break;
+                s.Say("/dolua gm_heal.lua"); s.Say("/warp 100 0 370 180"); _st = 1; _f = 0; break;
             case 1 when _f > 60 && !s!.InBattle:
                 if (_f % 20 == 0) s.Step(_f / 20 % 2 == 0 ? 2 : 6);
                 if (_f > 6000) { Check(false, "遇敌"); return End(); }

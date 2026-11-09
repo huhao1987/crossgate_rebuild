@@ -463,44 +463,79 @@ public partial class BattleUi : CanvasLayer
     private CommandKind _pickKind = CommandKind.Attack; private int _pickSide = 1, _pickArg = -1;
     private Control? _itemMenu;
 
-    /// <summary>"物品"：在指令面板下方列出背包道具，点一个再选目标（我方）。</summary>
+    /// <summary>
+    /// "物品"窗口（官方 4.06 实测）：22737 在 (688,111)，背包 20 格 5×4，格子 (696+52列, 145+53行) 48×48（同更换武器）；
+    /// 战斗里不能用的（rU 用途段第 1 位是 0：装备、材料、金币、魔石、卡片…）盖红叉 22738。鼠标停在道具上，下面出说明框 22541（688,277）。
+    /// 双击能用的 → 窗口关掉、"请选择目标。" → 点人 = Rg I|格|目标（封印卡对敌人）。取消 22681/82 (788,369)。
+    /// </summary>
     private void ShowItemMenu()
     {
-        var items = BagItems?.Invoke() ?? Array.Empty<(int, int, int)>();
-        if (items.Count == 0) { _msg!.Text = "没有道具。"; return; }
-        const int RowH = 20, W = 260;
-        float h = items.Count * RowH + 16;
-        var menu = new Control { Position = new Vector2(_panel!.Size.X - W - 8, 140), Size = new Vector2(W, h) };
-        menu.AddChild(CgFrame.Tint(new Vector2(W, h)));
-        menu.AddChild(new CgFrame { Cache = Cache, Size = new Vector2(W, h), MouseFilter = Control.MouseFilterEnum.Ignore, CenterAlpha = 0 });
-        for (int i = 0; i < items.Count; i++)
+        CloseSub(); _picking = false; ShowBar(false);
+        Img(22737, 688, 111);
+        var bag = BagStacks?.Invoke() ?? Array.Empty<ItemStack>();
+        for (int i = 0; i < 20; i++)
         {
-            var (slot, id, count) = items[i];
-            var look = ItemLook?.Invoke(id) ?? ("道具", 0);
-            var row = new Control { Position = new Vector2(8, 8 + i * RowH), Size = new Vector2(W - 16, RowH), MouseFilter = Control.MouseFilterEnum.Stop };
-            var box = new ReferenceRect { BorderColor = new Color(0.1f, 0.8f, 0.1f), BorderWidth = 1, EditorOnly = false, Size = row.Size, Visible = false, MouseFilter = Control.MouseFilterEnum.Ignore };
-            row.AddChild(box);
-            var lab = NameTag.Make(count > 1 ? $"{look.Name}  ×{count}" : look.Name, Colors.White, 0);
-            lab.HorizontalAlignment = HorizontalAlignment.Left; lab.Position = new Vector2(6, 3); row.AddChild(lab);
-            row.MouseEntered += () => box.Visible = true; row.MouseExited += () => box.Visible = false;
-            int sl = slot; bool seal = look.Name.Contains("封印卡");
-            row.GuiInput += e =>
+            float x = 696 + 52 * (i % 5), y = 145 + 53 * (i / 5);
+            var it = bag.FirstOrDefault(b => b.Slot == 8 + i);
+            if (it == null) continue;
+            if (it.Graphic > 0 && Cache.ImageNo(it.Graphic).Tex is { } t)
             {
-                if (e is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) return;
-                PickItem(sl, seal);
-            };
-            menu.AddChild(row);
+                var sz = t.GetSize();
+                _sub!.AddChild(new TextureRect { Texture = t, Position = Q(x + 24 - sz.X / 2, y + 24 - sz.Y / 2), MouseFilter = Control.MouseFilterEnum.Ignore });
+            }
+            if (it.Count > 1) Text(it.Count.ToString(), x + 46, y + 31, new Color(0.4f, 1, 1), right: true);
+            bool ok = (it.Use & 1) != 0;
+            if (!ok) Img(22738, x, y);
+            var item = it;
+            var h = Hit(x, y, 48, 48, () => { if (ok) ItemClicked(item); });
+            h.MouseEntered += () => ItemTip(item); h.MouseExited += () => { _itemTip?.QueueFree(); _itemTip = null; };
         }
-        _panel.AddChild(menu); _itemMenu = menu;
+        TexButton(22681, 22682, 788, 369, () => { CloseSub(); ShowBar(true); });
+    }
+
+    private Control? _itemTip; private long _itemClick; private int _itemClickSlot = -1;
+    private void ItemClicked(ItemStack it)
+    {
+        long now = (long)Time.GetTicksMsec();
+        bool dbl = _itemClickSlot == it.Slot && now - _itemClick < 500;
+        _itemClick = now; _itemClickSlot = it.Slot;
+        if (dbl) { _itemClickSlot = -1; _itemTip = null; CloseSub(); PickItem(it.Slot, it.Name.Contains("封印卡")); }
+    }
+
+    /// <summary>道具说明框（同物品窗口：22541，标题橙色居中、说明按颜色码）。</summary>
+    private void ItemTip(ItemStack it)
+    {
+        _itemTip?.QueueFree();
+        if (Cache.ImageNo(22541).Tex is not { } bg) return;
+        var tip = new Control { Position = Q(688, 277), MouseFilter = Control.MouseFilterEnum.Ignore };
+        tip.AddChild(new TextureRect { Texture = bg, MouseFilter = Control.MouseFilterEnum.Ignore });
+        float tw = it.Name.Sum(CgText.Cells) * CgText.CellW;
+        tip.AddChild(new CgText { Text = it.Name, FontColor = Colors.White, Position = new Vector2(133 - tw / 2, 10 - 2) });
+        var lines = ItemPanel.DescLines(it.Desc);
+        for (int l = 0; l < lines.Count && 37 + 18 * l + 14 < 184; l++)
+        {
+            float x = 10;
+            foreach (var (text, color) in lines[l])
+            {
+                tip.AddChild(new CgText { Text = text, Wrap = 999, FontColor = color, Position = new Vector2(x, 37 + 18 * l - 2) });
+                x += text.Sum(CgText.Cells) * CgText.CellW;
+            }
+        }
+        _sub!.AddChild(tip); _itemTip = tip;
     }
 
     /// <summary>选了一个道具：封印卡（抓宠）对敌人用，其他对自己人用。</summary>
     private void PickItem(int slot, bool seal)
     {
-        _itemMenu?.QueueFree(); _itemMenu = null;
+        _itemMenu?.QueueFree(); _itemMenu = null; _itemTip = null; CloseSub();
         GameLog.Write("战斗", $"道具 第{slot}格{(seal ? "（封印卡）" : "")}");
-        _pickKind = CommandKind.Item; _pickSide = seal ? 1 : 0; _pickArg = slot; _picking = true; _msg!.Text = "请选择目标。";
+        _pickKind = CommandKind.Item; _pickSide = seal ? 1 : 0; _pickArg = slot; _picking = true; ShowBar(true); _msg!.Text = "请选择目标。";
     }
+    /// <summary>测试用：物品窗口里某格是不是盖了红叉（不能用）。</summary>
+    public bool ItemWindowOpen => _sub?.GetChildren().OfType<TextureRect>().Any(t => t.Texture == Cache.ImageNo(22737).Tex) == true;
+    public void TestPressItem() => OnPanelButton(CommandKind.Item);
+    public void TestDoubleClickItem(ItemStack it) { ItemClicked(it); ItemClicked(it); }
+    public int ItemWindowCrosses => _sub?.GetChildren().OfType<TextureRect>().Count(t => t.Texture == Cache.ImageNo(22738).Tex) ?? 0;
     /// <summary>测试用：点「物品」、选第 slot 格道具（和点菜单一样的路径）。</summary>
     public void TestPickItem(int slot)
     {
@@ -514,6 +549,7 @@ public partial class BattleUi : CanvasLayer
     /// <summary>测试用：面板是否显示、背景是不是指令2（22677）。</summary>
     public (bool Visible, bool Second) PanelState => (_panel?.Visible ?? false, _panelBg?.Texture != null && _panelBg.Texture == Cache.ImageNo(22677).Tex);
     public void TestPressAttack() => OnPanelButton(CommandKind.Attack);
+    public void TestPressGuard() => OnPanelButton(CommandKind.Guard);
     /// <summary>测试用：指令按钮在画面（画布坐标）里的矩形；第 i 个 = PanelButtons 顺序（0 攻击）。</summary>
     public Rect2? CommandButtonRect(int i) => i < _cmdButtons.Count ? _cmdButtons[i].Btn.GetGlobalRect() : null;
     /// <summary>测试用：某个单位在画面上"该点的位置"（精灵脚下往上 40）。</summary>

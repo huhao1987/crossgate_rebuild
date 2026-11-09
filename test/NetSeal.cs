@@ -54,6 +54,8 @@ public partial class NetSeal : SceneTree
                 // 宠物指令：防御
                 if (s!.PetTurn && b.PetPhaseShown && !b.Picking && _f % 20 == 0) b.TestClickSub(1);
                 else if (s.PetTurn && b.Picking && _f % 20 == 10) b.TestPickTarget(s.CurrentBattle.PlayerUnitId);
+                // 没带宠物上场：指令2 防御
+                else if (!s.PetTurn && s.CommandSlot == 1 && b.PanelState.Visible && !b.Picking && !b.Busy && _f % 30 == 15) b.TestPressGuard();
                 if (b.SealsShown > 0 || !s.InBattle) { _st = 5; _f = 0; }
                 if (_f > 3000) { Check(false, "没播封印动画"); return End(); }
                 break;
@@ -62,7 +64,7 @@ public partial class NetSeal : SceneTree
                 Check(!s!.InBattle, "抓到后战斗结束");
                 _st = 6; _f = 0; break;
             case 6 when _f == 60:
-                var newPet = s!.Player.Pets.OrderByDescending(p => p.Slot).FirstOrDefault();
+                var newPet = s!.Player.Pets.FirstOrDefault(p => p.Name == _target) ?? s.Player.Pets.OrderByDescending(p => p.Slot).FirstOrDefault();   // 新宠物放在第一个空栏，不一定是最后一栏
                 Check(s.Player.Pets.Count == _pets0 + 1 && newPet?.Name == _target, $"宠物栏多了一只：{_pets0} → {s.Player.Pets.Count}，新的是 {newPet?.Name}（遇到的是 {_target}）");
                 Check(_m.Chat.Lines.Any(l => l.Contains("忠诚")) || true, $"聊天栏：{string.Join(" / ", _m.Chat.Lines.TakeLast(2))}");
                 s.Say("/dolua gm_petclear.lua");

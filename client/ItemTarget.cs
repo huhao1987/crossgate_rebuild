@@ -5,7 +5,7 @@ namespace CgPort.Godot;
 
 /// <summary>
 /// 用道具（药等）时的"请选择使用对象"窗口（官方 4.06 实测）：棕框 510×235 在 (225,229)。
-/// 表头 健康/等级/姓名/生命力/魔力，每行一个对象（自己、自己的宠物；行距 22），自己的名字绿色。
+/// 表头 健康/等级/姓名/生命力/魔力（健康：受伤 = 黄点，实测受伤 30 是黄；更重的颜色没测），每行一个对象（自己、自己的宠物；行距 22），自己的名字绿色。
 /// 底下「取消」「上一页」（回到"请选择对象"选队伍里的人）。点一行 = 对它用。
 /// 前一步"请选择对象"跟交易的选人窗口是同一个样子，直接用 <see cref="TradePicker"/>。
 /// </summary>
@@ -40,7 +40,7 @@ public partial class ItemTargetWindow : CanvasLayer
             hit.MouseEntered += () => box.Visible = true; hit.MouseExited += () => box.Visible = false;
             hit.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) { Visible = false; Picked?.Invoke(code); } };
             win.AddChild(hit);
-            win.AddChild(new ColorRect { Color = t.Hp > 0 ? new Color(0, 0.9f, 0) : new Color(0.9f, 0, 0), Position = new Vector2(49, y + 1), Size = new Vector2(10, 10), MouseFilter = Control.MouseFilterEnum.Ignore });
+            win.AddChild(new ColorRect { Color = t.Hp <= 0 ? new Color(0.9f, 0, 0) : t.Injury > 0 ? new Color(0.95f, 0.9f, 0) : new Color(0, 0.9f, 0), Position = new Vector2(49, y + 1), Size = new Vector2(10, 10), MouseFilter = Control.MouseFilterEnum.Ignore });
             Label(win, t.Level.ToString(), 109, y, Colors.White, right: true);
             Label(win, t.Name, 129, y, t.Self ? new Color(0, 1, 0) : Colors.White);
             Label(win, $"{t.Hp}/{t.MaxHp,4}", 348, y, Colors.White, right: true);

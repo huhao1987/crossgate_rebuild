@@ -34,6 +34,10 @@ public sealed class ItemStack
     public string Name { get; set; } = "";
     public string Desc { get; set; } = "";
     public int Graphic { get; set; }
+    /// <summary>联网：rU 第 6 段（图像后第 2 段）。官方战斗"物品"窗口里第 1 位为 0 的道具盖红叉不能用（实测：药、封印卡 = 1，装备 2/6，材料、金币、魔石、卡片 = 0）。</summary>
+    public int Use { get; set; }
+    /// <summary>联网：rU 第 8 段（图像后第 4 段）= 道具等级（水龙装备 7、铜剑 1；没鉴定的也有）。</summary>
+    public int Level { get; set; }
     /// <summary>联网模式：服务端的格子号（8 起是背包，0–7 是装备栏）。单机模式不用，为 -1。</summary>
     public int Slot { get; set; } = -1;
 }

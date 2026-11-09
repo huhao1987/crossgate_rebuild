@@ -376,28 +376,107 @@ public partial class ItemPanel : CgWindow
 /// </summary>
 public partial class SystemPanel : CgWindow
 {
-    public static readonly string[] Items = { "登      出", "聊 天 设 定", "声 音 设 定", "鼠 标 设 定", "键 盘 热 键", "绘 图 设 定", "高 级 设 定" };
+    public static readonly string[] Items = { "登      出", "聊 天 设 定", "声 音 设 定", "鼠 标 设 定", "键 盘 热 键", "绘 图 设 定", "战 斗 录 像", "高 级 设 定" };
     public Action<int>? Chosen;
+    /// <summary>当前页：-1 菜单，2 音樂（22961），3 滑鼠（22963），4 鍵盤（22964），5 繪圖設定（22965）。</summary>
+    public int Page { get; private set; } = -1;
+    public GameConfig Cfg = null!;
+    public Action? DrawChanged;   // 绘图设定改了（主程序重画周围对象）
+    public Action<string>? Toast;
 
     public override void _Ready()
     {
         Layer = 16;
         Build(new Vector2(1, 1), false);
         Visible = false;
+        VisibilityChanged += () => { if (Visible) { Page = -1; Refresh(); } };
     }
+
+    public void Open(int page) { Page = page; Refresh(); }
 
     public override void Refresh()
     {
         if (!Visible) return;
         Clear();
-        Img(22500, 0, 0, block: true);
-        Btn(22509, 22510, 167, 7, () => Visible = false);
-        for (int i = 0; i < Items.Length; i++)
+        var yellow = new Color(1, 1, 0);
+        switch (Page)
         {
-            int k = i;
-            Txt(Items[i], 47, 64 + 27 * i + 3);
-            Hit(42, 60 + 27 * i, 100, 19, _ => Chosen?.Invoke(k));
+            case 2:   // 音樂：背景音乐 / 音效 0–15（官方默认 8），↑↓ 调
+                Img(22961, 0, 0, block: true);
+                Txt("背景音乐音量", 14, 48, yellow);
+                Level(73, () => Cfg.BgmVolume, v => Cfg.BgmVolume = v);
+                Txt("音效音量", 14, 98, yellow);
+                Level(122, () => Cfg.SeVolume, v => Cfg.SeVolume = v);
+                break;
+            case 3:   // 滑鼠：设定物品的移动（手机上是点按，固定）
+                Img(22963, 0, 0, block: true);
+                Txt("设定物品的移动", 16, 48, yellow);
+                Txt("现在", 16, 73);
+                Txt("鼠标左键", 38, 100);
+                Txt("<变更>", 126, 124);
+                Hit(124, 120, 50, 18, _ => Toast?.Invoke("手机上用点按，不能改"));
+                break;
+            case 4:   // 鍵盤：热键一览
+                Img(22964, 0, 0, block: true);
+                string[] keys = { "冒险者日志(F9)", "人物名称显示(F11)", "血条显示(Ctrl+F11)", "截取屏幕(F12)", "窗口大小切换(Ctrl+F12)", "表情输入框开关(TAB)", "清除屏幕聊天(HOME)", "老板键(F10)" };
+                for (int i = 0; i < keys.Length; i++) Txt(keys[i], 16, 50 + 26 * i, yellow);
+                break;
+            case 5:   // 繪圖設定
+                Img(22965, 0, 0, block: true);
+                Option(0, "隐藏画面角色", Cfg.HidePlayers ? "隐藏" : "不隐藏", () => { Cfg.HidePlayers = !Cfg.HidePlayers; GameConfig.Patch(("hide_players", Cfg.HidePlayers ? 1 : 0)); DrawChanged?.Invoke(); });
+                Option(1, "显示NPC名字", Cfg.ShowNpcNames ? "开启" : "关闭", () => { Cfg.ShowNpcNames = !Cfg.ShowNpcNames; GameConfig.Patch(("npc_names", Cfg.ShowNpcNames ? 1 : 0)); DrawChanged?.Invoke(); });
+                Option(2, "战斗背景修正", "开启", () => Toast?.Invoke("这项还没做"));
+                Option(3, "过场动画样式", "默认", () => Toast?.Invoke("这项还没做"));
+                break;
+            default:
+                Page = -1;
+                Img(22500, 0, 0, block: true);
+                Btn(22509, 22510, 167, 7, () => Visible = false);
+                for (int i = 0; i < Items.Length; i++)
+                {
+                    int k = i;
+                    Txt(Items[i], 47, 64 + 27 * i + 3);
+                    Hit(42, 60 + 27 * i, 100, 19, _ => Chosen?.Invoke(k));
+                }
+                return;
         }
+        Btn(22509, 22510, 167, 7, () => Visible = false);
+        Txt("回上一页", 64, 270);
+        Hit(60, 266, 72, 18, _ => { Page = -1; Refresh(); });
+    }
+
+    /// <summary>音量一行："现在 N ↑ ↓"（官方 0–15，存成 0–100）。</summary>
+    private void Level(float y, Func<int> get, Action<int> set)
+    {
+        int lv = (int)Math.Round(get() * 15 / 100.0);
+        Txt("现在", 14, y); Txt(lv.ToString(), 59, y);
+        void Change(int d)
+        {
+            int n = Math.Clamp(lv + d, 0, 15);
+            set((int)Math.Round(n * 100 / 15.0));
+            GameAudio.I?.SetVolumes(Cfg.BgmVolume / 100f, Cfg.SeVolume / 100f);
+            GameConfig.Patch(("bgm_volume", Cfg.BgmVolume), ("se_volume", Cfg.SeVolume));
+            Refresh();
+        }
+        Txt("↑", 129, y); Hit(124, y - 4, 18, 18, _ => Change(1));
+        Txt("↓", 153, y); Hit(148, y - 4, 18, 18, _ => Change(-1));
+    }
+
+    private void Option(int i, string label, string value, Action change)
+    {
+        float y = 48 + 50 * i;
+        Txt(label, 16, y, new Color(1, 1, 0));
+        Txt("现在", 16, y + 25); Txt(value, 67, y + 25);
+        Txt("<变更>", 126, y + 25);
+        Hit(124, y + 21, 50, 18, _ => { change(); Refresh(); });
+    }
+
+    public void TestLevel(bool bgm, int delta)
+    {
+        if (bgm) Cfg.BgmVolume = Math.Clamp((int)Math.Round((Math.Round(Cfg.BgmVolume * 15 / 100.0) + delta) * 100 / 15.0), 0, 100);
+        else Cfg.SeVolume = Math.Clamp((int)Math.Round((Math.Round(Cfg.SeVolume * 15 / 100.0) + delta) * 100 / 15.0), 0, 100);
+        GameAudio.I?.SetVolumes(Cfg.BgmVolume / 100f, Cfg.SeVolume / 100f);
+        Refresh();
     }
 }
 

@@ -43,6 +43,10 @@ public sealed class NetworkSession : IGameSession
     public event Action? ObjectsChanged;
     /// <summary>周围某个对象（其他玩家、会走的 NPC）走了一步：参数是更新后的对象。</summary>
     public event Action<Npc>? ObjectMoved;
+    /// <summary>别人做了个动作（坐下、挥手…）：对象编号、动作号。</summary>
+    public event Action<int, int>? ObjectActed;
+    /// <summary>「動作」窗口：MIS x y 动作号（官方实测 "MIS 3N 1O b" = 坐下 11）。</summary>
+    public void Emote(int code) => Send("MIS", B62(X), B62(Y), B62(code));
     /// <summary>登录状态变化（显示给玩家）。</summary>
     public event Action<string>? Status;
     public event Action<string, int>? ChatReceived;
@@ -306,7 +310,8 @@ public sealed class NetworkSession : IGameSession
             case "rU":    // I：道具
                 OnItems(rest.Trim());
                 break;
-            case "dAgg":  // EN：进入战斗
+            case "dAgg":  // EN：进入战斗（"dAgg 0 0" = 对战/突袭失败，官方随后 "Zd 突发战斗失败"）
+                if (f.Length > 0 && f[0] == "0") break;
                 InBattle = true; _battleShown = false; _turn = 0; _units.Clear(); _down.Clear(); _lastTurnAnswered = -1;
                 break;
             case "LYIm":  // B：战斗
@@ -361,6 +366,13 @@ public sealed class NetworkSession : IGameSession
                 break;
             case "LY":    // GFLI：用道具要先选队伍里的人
                 ItemMemberRequested?.Invoke(ItemMembers());
+                break;
+            case "ysVc":  // 急救：服务端同意（iET 之后），客户端弹"请选择对象"（队伍成员）
+                _treating = true;
+                ItemMemberRequested?.Invoke(ItemMembers());
+                break;
+            case "ND":    // 急救：选了人之后的对象表（名字|等级|受伤|生命|最大生命|魔力|最大魔力）×N
+                OnTreatTargets(rest.Trim());
                 break;
             case "nFV":   // GPDI：选了人之后，选具体对象（人 / 宠物）
                 ItemTargetRequested?.Invoke(ItemTargets());
@@ -481,10 +493,13 @@ public sealed class NetworkSession : IGameSession
         }
         int.TryParse(p[2], out var x); int.TryParse(p[3], out var y); int.TryParse(p[4], out var dir); int.TryParse(p[5], out var img);
         _objects[id] = new Npc(D62Safe(id), _floor, x, y, dir, img, Encoding.Latin1.GetString(Gbk.Encode(Unesc(p[8]))));   // Npc.RawName 约定是按 Latin1 存的原始 GBK 字节
-        _ = type;
+        if (type == 1) _playerObjs.Add(D62Safe(id)); else _playerObjs.Remove(D62Safe(id));
     }
 
     private static int D62Safe(string s) { try { return D62(s); } catch { return 0; } }
+    /// <summary>nsY 第 1 段类型 1 = 玩家（实测：hao、bob 是 1，NPC 是 29/48/50/80…）。</summary>
+    private readonly HashSet<int> _playerObjs = new();
+    public bool IsPlayerObj(int id) => _playerObjs.Contains(id);
 
     private void OnAction(string s)
     {
@@ -494,6 +509,10 @@ public sealed class NetworkSession : IGameSession
             var p = seg.Split('|');
             if (p.Length < 5) continue;
             if (p[0] == SelfId) continue;   // 自己的位置以本地预测 + QBt 校正为准
+            {
+                int fid = D62Safe(p[0]);
+                if (p[3] == "40" ? _fighting.Add(fid) : _fighting.Remove(fid)) FightingChanged?.Invoke();
+            }
             if (p[3] == "200")   // 摆摊：id|x|y|200|0|1 开张、…|0 收摊（实测）
             {
                 int sid = D62Safe(p[0]);
@@ -507,6 +526,8 @@ public sealed class NetworkSession : IGameSession
                 var moved = x != n.X || y != n.Y;
                 _objects[p[0]] = n with { X = x, Y = y, Dir = int.TryParse(p[4], out var d) ? d : n.Dir };
                 if (moved) ObjectMoved?.Invoke(_objects[p[0]]);
+                // 动作（官方 動作 窗口发 MIS，旁人收到 NI id|x|y|动作号|朝向）：3–20 动画动作、30 走路、31 站立
+                else if (int.TryParse(p[3], out var act) && (act is >= 3 and <= 20 || act is 30 or 31)) ObjectActed?.Invoke(n.Id, act);
             }
         }
     }
@@ -719,11 +740,48 @@ public sealed class NetworkSession : IGameSession
     public event Action<int>? RecipesChanged;
     /// <summary>生产结果：成功、种类（1 制造 4 采集）、原始段。</summary>
     public event Action<ProduceResult>? ProduceDone;
-    public sealed record ProduceResult(bool Ok, int Type, int Exp, int Image, string Name, IReadOnlyList<string> Lost);
+    public sealed record ProduceResult(bool Ok, int Type, int Exp, int Image, string Name, IReadOnlyList<string> Lost, int Heal = 0);
     public void RequestRecipes(int skillSlot) => Send("fS", skillSlot.ToString());
     /// <summary>工作状态 IPy：5 平常、6 采集中、10 制造中（62 进制 "a"）。</summary>
     public void SetWork(int state) => Send("IPy", B62(state));
     public void Gather(int skillSlot, int tech = 0) => Send("sM", skillSlot.ToString(), tech.ToString(), "-1", "");
+    /// <summary>
+    /// 鉴定 / 修理 / 刻印（技能种类 2，官方 bob 实测 2026-11-09）：点招式 → klF x y 头顶图标 → 選擇物品窗口（23354）双击道具、按「鑑定」
+    /// → IPy c（鉴定中，修理 d）→ 约 12 秒后 sM 栏 招式 格(62 进制) 空 → rU（鉴定后名字、说明变了）+ cNE + JgO 1/0 2 经验|0|0|0|0|0|0 → IPy 5。
+    /// 没受损的东西去修："Zd 此道具并未受损。" + JgO 0。
+    /// </summary>
+    public void UseOnItem(int skillSlot, int tech, int bagSlot) => Send("sM", skillSlot.ToString(), tech.ToString(), B62(bagSlot), "");
+    /// <summary>
+    /// 急救（技能种类 3）：点招式 → iET 栏 → 服务端 ysVc（空）→ 客户端"请选择对象"（队伍成员）→ McVa 序号 → 服务端 ND 对象表
+    /// → "请选择使用对象" → sM 栏 招式 对象（0 人，宠物 = 栏位+1）空，马上就有结果：对方 aPc + "Zd 接受bob的急救，回复了30点的生命力。"，自己 JgO 1 3 经验|…|回复量。
+    /// </summary>
+    public void RequestTreat(int skillSlot, int tech) { _treatSkill = skillSlot; _treatTech = tech; Send("iET", skillSlot.ToString()); }
+    private bool _treating; private int _treatSkill, _treatTech;
+    public bool Treating => _treating;
+    /// <summary>头顶的技能图标 klF x y 号（官方 exe：技能 200–216 制造 10、215 11、修理 217/218 13、鉴定 219 12、急救 223/224 14、伐木 225 5、狩猎 226 7、挖掘 227 6；0 = 去掉）。</summary>
+    public void SkillIcon(int skillId)
+    {
+        int code = skillId switch
+        {
+            215 => 11, >= 200 and <= 216 => 10, 217 or 218 => 13, 219 => 12, 220 or 221 or 222 or 255 => 10,
+            223 or 224 => 14, 225 or 251 => 5, 226 or 253 => 7, 227 or 250 => 6, 2000 => 9, _ => 0,
+        };
+        Send("klF", B62(X), B62(Y), B62(code));
+    }
+    public void ClearSkillIcon() => Send("klF", B62(X), B62(Y), "0");
+
+    private void OnTreatTargets(string s)
+    {
+        var p = s.Split('|');
+        var list = new List<ItemTarget>();
+        for (int i = 0, k = 0; i + 6 < p.Length; i += 7, k++)
+        {
+            if (p[i].Length == 0) continue;
+            list.Add(new ItemTarget(k, Unesc(p[i]), Int(p, i + 1), Int(p, i + 3), Int(p, i + 4), Int(p, i + 5), Int(p, i + 6), Unesc(p[i]) == Player.Name) { Injury = Int(p, i + 2) });
+        }
+        ItemTargetRequested?.Invoke(list);
+    }
+
     public void Craft(int skillSlot, int tech, int recipeId, IEnumerable<int> bagSlots) =>
         Send("sM", skillSlot.ToString(), tech.ToString(), "-1", string.Join("|", new[] { recipeId }.Concat(bagSlots)));
 
@@ -759,6 +817,7 @@ public sealed class NetworkSession : IGameSession
             r = new ProduceResult(ok, type, exp, ni > 0 ? Int(p, ni - 1) : -1, ni > 0 ? Unesc(p[ni]) : "", Array.Empty<string>());
         }
         else r = new ProduceResult(ok, type, exp, Int(p, 7), "", p.Skip(8).Where(x => x.Trim().Length > 0).Select(Unesc).ToList());
+        if (type == 3) r = r with { Heal = Int(p, 6) };   // 急救：JgO 1 3 经验|0|0|0|0|0|回复量
         ProduceDone?.Invoke(r);
     }
 
@@ -928,6 +987,14 @@ public sealed class NetworkSession : IGameSession
 
     /// <summary>右上「交易」按钮（Ctrl+'）：问服务端面前有谁能交易。</summary>
     public void RequestTrade() => Send("ixH");
+    /// <summary>右上「对战」（Ctrl+J，官方实测 "ik x y"）：跟面前的玩家 PK；对方没开「戰」→ "dAgg 0 0" + "Zd 突发战斗失败"。</summary>
+    public void Duel() => Send("ik", B62(X), B62(Y));
+    /// <summary>右上「观战」（Ctrl+K，"IMv x y"）：看面前正在战斗的人（头上有 Battle 标志，NI 动作 40）。不让看时服务端回 "本区域不允许观战。"</summary>
+    public void Watch() => Send("IMv", B62(X), B62(Y));
+    private readonly HashSet<int> _fighting = new();
+    /// <summary>这个对象正在战斗（NI 动作 40，官方头上显示 Battle）。</summary>
+    public bool IsFighting(int id) => _fighting.Contains(id);
+    public event Action? FightingChanged;
     /// <summary>"请选择对象"里点了第 i 个。</summary>
     public void SelectTradeTarget(int i)
     {
@@ -1065,7 +1132,7 @@ public sealed class NetworkSession : IGameSession
         if (i + 12 >= p.Length || !int.TryParse(p[i], out var slot)) return null;
         if (p[i + 1].Length == 0 || !int.TryParse(p[i + 4], out var gfx) || !int.TryParse(p[i + 10], out var itemId)) return null;
         int count = int.TryParse(p[i + 12], out var c) && c > 0 ? c : 1;
-        return new ItemStack { ItemId = itemId, Count = count, Slot = slot, Name = Unesc(p[i + 1]), Desc = p[i + 3], Graphic = gfx };
+        return new ItemStack { ItemId = itemId, Count = count, Slot = slot, Name = Unesc(p[i + 1]), Desc = p[i + 3], Graphic = gfx, Use = int.TryParse(p[i + 6], out var u) ? u : 0, Level = int.TryParse(p[i + 8], out var lv) ? lv : 0 };
     }
 
     private void OnItems(string s)
@@ -1531,20 +1598,25 @@ public sealed class NetworkSession : IGameSession
     // ———————————————————— 道具 / 加点 ————————————————————
 
     /// <summary>双击道具（ID 包 = Ak，官方实测 "Ak 3U 1C f 0"：坐标、格子 62 进制、0）：背包里的装备 = 穿上，药 = 用，装备栏里的 = 换手。</summary>
-    public void UseItem(int slot) { _usingSlot = slot; Send("Ak", B62(X), B62(Y), B62(slot), "0"); }
+    public void UseItem(int slot) { _usingSlot = slot; _treating = false; Send("Ak", B62(X), B62(Y), B62(slot), "0"); }
 
     // ———— 用道具选对象（官方实测 2026-11-07）————
     // 双击药 → Ak → 服务端 LY（GFLI）→ 客户端弹"请选择对象"（队伍成员，单人就是自己）→ 点了发 mjCv 序号（GPDI）
     // → 服务端 nFV → 客户端弹"请选择使用对象"（那个人 + 他的宠物：健康/等级/姓名/生命力/魔力）→ 点了发 iVfo x y 格子 对象（0 人，宠物 = 栏位+1）。
     private int _usingSlot = -1, _usingMember;
-    public sealed record ItemTarget(int Code, string Name, int Level, int Hp, int MaxHp, int Mp, int MaxMp, bool Self);
+    public sealed record ItemTarget(int Code, string Name, int Level, int Hp, int MaxHp, int Mp, int MaxMp, bool Self) { public int Injury { get; init; } }
     /// <summary>LY：要选队伍里的人（名字列表）。</summary>
     public event Action<IReadOnlyList<string>>? ItemMemberRequested;
     /// <summary>nFV：要选具体对象。</summary>
     public event Action<IReadOnlyList<ItemTarget>>? ItemTargetRequested;
     public IReadOnlyList<string> ItemMembers() => InParty ? _party.Values.Select(m => m.Name).ToList() : new List<string> { Player.Name };
-    public void SelectItemMember(int index) { _usingMember = index; Send("mjCv", index.ToString()); }
-    public void UseItemOn(int target) { if (_usingSlot >= 0) Send("iVfo", B62(X), B62(Y), B62(_usingSlot), target.ToString()); }
+    public void SelectItemMember(int index) { _usingMember = index; Send(_treating ? "McVa" : "mjCv", index.ToString()); }
+    public void UseItemOn(int target)
+    {
+        if (_treating) { _treating = false; Send("sM", _treatSkill.ToString(), _treatTech.ToString(), target.ToString(), ""); return; }
+        if (_usingSlot >= 0) Send("iVfo", B62(X), B62(Y), B62(_usingSlot), target.ToString());
+    }
+    public void CancelTreat() => _treating = false;
     /// <summary>选中的队员是自己：自己 + 自己的宠物；别人：只有他（他的宠物要 nFV 里的数据，格式还没抓到）。</summary>
     public List<ItemTarget> ItemTargets()
     {

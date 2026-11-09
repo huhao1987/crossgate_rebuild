@@ -40,6 +40,22 @@ public sealed class GameConfig
     public bool ShowFps;
     /// <summary>音乐、音效音量 0–100（bgm_volume / se_volume，默认 80）。</summary>
     public int BgmVolume = 80, SeVolume = 80;
+    /// <summary>系统 → 绘图设定（官方 4.06）：隐藏画面角色（别的玩家不画）、显示 NPC 名字。</summary>
+    public bool HidePlayers, ShowNpcNames = true;
+
+    /// <summary>改 user://config.json 里的几项（游戏里的设定窗口用，不用重启）。</summary>
+    public static void Patch(params (string Key, int Value)[] kv)
+    {
+        try
+        {
+            if (!global::Godot.FileAccess.FileExists("user://config.json")) return;
+            if (System.Text.Json.Nodes.JsonNode.Parse(global::Godot.FileAccess.GetFileAsString("user://config.json")) is not System.Text.Json.Nodes.JsonObject o) return;
+            foreach (var (k, v) in kv) o[k] = v;
+            using var f = global::Godot.FileAccess.Open("user://config.json", global::Godot.FileAccess.ModeFlags.Write);
+            f.StoreString(o.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+        }
+        catch { }
+    }
     /// <summary>界面模式："mobile" 手机（界面整数倍放大）、"original" 原版（和官方 960×720 一样）、空 = 自动（安卓手机用 mobile）。</summary>
     public string UiMode = "";
     public bool MobileUi => UiMode == "mobile" || (UiMode == "" && global::Godot.OS.GetName() == "Android");
@@ -148,7 +164,7 @@ public sealed class GameConfig
             Encounters = o["encounters"]?.GetValue<bool>() ?? true,
             Zoom = (float)(o["zoom"]?.GetValue<double>() ?? 1.0),
             LoadSave = o["load_save"]?.GetValue<bool>() ?? true,
-            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), UiMode = Str(o, "ui_mode", ""),
+            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), HidePlayers = Int(o, "hide_players", 0) != 0, ShowNpcNames = Int(o, "npc_names", 1) != 0, UiMode = Str(o, "ui_mode", ""),
             Account = Str(o, "account", ""), Password = Str(o, "password", ""), CdKey = Str(o, "cdkey", ""),
         };
         if (o["start"] is JsonArray st && st.Count == 2) { c.StartX = st[0]!.GetValue<int>(); c.StartY = st[1]!.GetValue<int>(); }

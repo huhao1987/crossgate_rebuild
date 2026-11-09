@@ -122,7 +122,12 @@ public partial class NetE2E : SceneTree
                     if (!_usedItem && pot != null && _main.Battle.Visible)
                     {
                         _usedItem = true; _hpBefore = s.Player.Hp; _potBefore = s.Player.Items.Where(i => i.ItemId == 15605).Sum(i => i.Count);
-                        _main.Battle.UseItemOn(pot.Slot, _main.Battle.PlayerId);
+                        // 官方路径：「物品」→ 物品窗口（22737，不能用的盖红叉）→ 双击药 → "请选择目标" → 点自己
+                        _main.Battle.TestPressItem();
+                        Check(_main.Battle.ItemWindowOpen, $"战斗物品窗口打开，红叉 {_main.Battle.ItemWindowCrosses} 个（背包 {s.Player.Items.Count} 件，能用 {s.Player.Items.Count(i => (i.Use & 1) != 0)} 件）");
+                        Shot("battle_items");
+                        _main.Battle.TestDoubleClickItem(pot);
+                        _main.Battle.TestPickTarget(_main.Battle.PlayerId);
                         _slotCheckAt = _frame + 10;
                     }
                     else if (_frame % 60 == 0)

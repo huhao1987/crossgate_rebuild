@@ -110,7 +110,12 @@ public partial class Hud : CanvasLayer
             root.AddChild(t); _top.Add(t);
         }
         if (Img(22561) is TextureRect small) { AnchorRight(small, 808 - 960, 37); root.AddChild(small); _top.Add(small); }
-        if (Img(22591) is TextureRect act) { AnchorRight(act, 827 - 960, 37); root.AddChild(act); _top.Add(act); }
+        if (Img(22591) is TextureRect act)
+        {
+            AnchorRight(act, 827 - 960, 37); root.AddChild(act); _top.Add(act);
+            act.MouseFilter = Control.MouseFilterEnum.Stop;   // 「動作」→ 动作窗口（官方 Ctrl+F）
+            act.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } || e is InputEventScreenTouch { Pressed: true }) ButtonPressed?.Invoke(22591); };
+        }
         SetFlags(Flags);
         // 左上「郵件」：有新邮件时亮（22571 盖在 (81,21)），点一下打开名片簿
         _mailLit = Img(22571);

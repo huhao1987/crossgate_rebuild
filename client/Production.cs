@@ -26,6 +26,11 @@ public partial class ProductionUi : Node
     public MaterialWindow Materials { get; private set; } = null!;
     public ProduceResultWindow Result { get; private set; } = null!;
     public GatherWindow Gathering { get; private set; } = null!;
+    public ItemSkillWindow ItemSkill { get; private set; } = null!;
+    public static double ItemSkillSeconds = 12;
+    public int Tech { get; private set; }
+    public int TargetSlot { get; private set; } = -1;   // 鉴定 / 修理的道具格
+    public string TargetName { get; private set; } = "";
 
     public SkillInfo? Skill { get; private set; }
     public RecipeInfo? Recipe { get; private set; }
@@ -41,25 +46,75 @@ public partial class ProductionUi : Node
         AddChild(Materials = new MaterialWindow { Cache = Cache, Ui = this });
         AddChild(Result = new ProduceResultWindow { Cache = Cache, Ui = this });
         AddChild(Gathering = new GatherWindow { Cache = Cache, Ui = this });
+        AddChild(ItemSkill = new ItemSkillWindow { Cache = Cache, Ui = this });
     }
 
     public void Bind(NetworkSession s)
     {
         s.RecipesChanged += slot => { if (Skill?.Slot == slot && Recipes.Visible) Recipes.Refresh(); };
         s.ProduceDone += OnDone;
-        s.StatusChanged += () => { if (Materials.Visible) Materials.Refresh(); if (Craft.Visible) Craft.Refresh(); };
+        s.StatusChanged += () => { if (Materials.Visible) Materials.Refresh(); if (Craft.Visible) Craft.Refresh(); if (ItemSkill.Visible) ItemSkill.Refresh(); };
     }
 
-    public bool AnyVisible => Recipes.Visible || Craft.Visible || Materials.Visible || Result.Visible || Gathering.Visible;
+    public bool AnyVisible => Recipes.Visible || Craft.Visible || Materials.Visible || Result.Visible || Gathering.Visible || ItemSkill.Visible;
 
-    void HideAll() { Recipes.Visible = Craft.Visible = Materials.Visible = Result.Visible = Gathering.Visible = false; }
+    void HideAll() { Recipes.Visible = Craft.Visible = Materials.Visible = Result.Visible = Gathering.Visible = ItemSkill.Visible = false; }
 
     /// <summary>技能详情里点了某个招式。</summary>
     public void UseTech(SkillInfo sk, int tech)
     {
         var s = Session(); if (s == null) return;
+        s.SkillIcon(sk.SkillId);   // 官方：点招式就发 klF（头顶图标）
+        Tech = tech;
         if (sk.Type == 1) { OpenRecipes(sk); return; }
+        if (sk.Type == 2) { OpenItemSkill(sk, tech); return; }
+        if (sk.Type == 3) { StartTreat(sk, tech); return; }
         if (sk.Type == 4) { StartGather(sk); return; }
+    }
+
+    // ———— 鉴定 / 修理 / 刻印 ————
+    public void OpenItemSkill(SkillInfo sk, int tech)
+    {
+        StopGather(); HideAll();
+        Skill = sk; Tech = tech; Recipe = null; TargetSlot = -1;
+        ItemSkill.Message = $"请选择要{sk.Name.Replace("武器", "").Replace("防具", "")}的道具。";
+        ItemSkill.Visible = true; ItemSkill.Refresh(); Opened?.Invoke();
+    }
+
+    public void ChooseItem(int slot)
+    {
+        if (Working || Skill == null) return;
+        var it = Session()?.Player.Items.FirstOrDefault(i => i.Slot == slot);
+        if (it == null) return;
+        TargetSlot = TargetSlot == slot ? -1 : slot;
+        int mp = ItemMp(it);
+        ItemSkill.Message = TargetSlot >= 0 ? $"需消耗{mp}点魔力。" : $"请选择要{Verb}的道具。";
+        ItemSkill.Refresh();
+    }
+    /// <summary>官方：鉴定 / 修理要的魔力 = 道具等级 × 10（实测 1 级铜剑 10；招式表里的 MP 段对这类技能不准）。</summary>
+    public static int ItemMp(ItemStack it) => Math.Max(1, it.Level) * 10;
+    public string Verb => Skill?.SkillId switch { 219 => "鉴定", 217 or 218 => "修理", _ => Skill?.Name ?? "" };
+
+    public void ExecuteItemSkill()
+    {
+        var s = Session(); if (s == null || Skill == null || Working) return;
+        if (TargetSlot < 0 || s.Player.Items.FirstOrDefault(i => i.Slot == TargetSlot) is not { } it) { ItemSkill.Message = $"请选择要{Verb}的道具。"; ItemSkill.Refresh(); return; }
+        int mp = ItemMp(it);
+        if (s.Player.Mp < mp) { ItemSkill.Message = "魔力不足。"; ItemSkill.Refresh(); return; }
+        TargetName = it.Name;
+        Working = true; int gen = ++_gen;
+        s.SetWork(Skill.SkillId == 219 ? 12 : 13);   // 官方：鉴定 IPy c、修理 IPy d
+        ItemSkill.Message = $"{Verb}中 . . ."; ItemSkill.Refresh();
+        int slot = TargetSlot, sk = Skill.Slot, tech = Tech;
+        GetTree().CreateTimer(ItemSkillSeconds).Timeout += () => { if (gen == _gen && Working) s.UseOnItem(sk, tech, slot); };
+    }
+
+    // ———— 急救 ————
+    public void StartTreat(SkillInfo sk, int tech)
+    {
+        StopGather(); HideAll();
+        Skill = sk; Tech = tech; Recipe = null;
+        Session()?.RequestTreat(sk.Slot, tech);
     }
 
     // ———— 制造 ————
@@ -117,6 +172,8 @@ public partial class ProductionUi : Node
     {
         if (Skill == null) return;
         if (Skill.Type == 4) { StartGather(Skill); return; }
+        if (Skill.Type == 2) { int keep = TargetSlot; OpenItemSkill(Skill, Tech); if (keep >= 0) ChooseItem(keep); return; }
+        if (Skill.Type == 3) { StartTreat(Skill, Tech); return; }
         if (Recipe == null) return;
         ChooseRecipe(Recipe);
         var s = Session();
@@ -153,10 +210,12 @@ public partial class ProductionUi : Node
     {
         if (GatherRunning) StopGather();
         else if (Working && Skill?.Type == 1) { _gen++; Working = false; Session()?.SetWork(5); Materials.Message = "请选择材料并登录。"; Materials.Refresh(); }
+        else if (Working && Skill?.Type == 2) { _gen++; Working = false; Session()?.SetWork(5); ItemSkill.Message = $"请选择要{Verb}的道具。"; ItemSkill.Refresh(); }
     }
 
     public void CloseAll()
     {
+        if (AnyVisible) Session()?.ClearSkillIcon();
         if (GatherRunning) { _gen++; GatherRunning = false; Working = false; Session()?.SetWork(5); }
         else if (Working) CancelCraft();
         HideAll();
@@ -181,12 +240,23 @@ public partial class ProductionUi : Node
             };
             return;
         }
+        if (r.Type is 2 or 3)
+        {
+            if (r.Type == 2) { Working = false; _gen++; s.SetWork(5); }
+            HideAll();
+            Result.Show(Skill, r, gather: false, Recipe);
+            return;
+        }
         Working = false; _gen++;
         s.SetWork(5);
         Craft.Visible = false; Materials.Visible = false;
         Result.Show(Skill, r, gather: false, Recipe);
     }
     public NetworkSession.ProduceResult? LastResult { get; private set; }
+    public string TreatName = "";
+    /// <summary>鉴定后道具名字会变（"单手剑？" → "铜剑"），官方结果里显示新名字。</summary>
+    public string TargetNameNow => Session()?.Player.Items.FirstOrDefault(i => i.Slot == TargetSlot)?.Name ?? TargetName;
+    public int TargetImage => Session()?.Player.Items.FirstOrDefault(i => i.Slot == TargetSlot)?.Graphic ?? 0;
 }
 
 /// <summary>选择秘笈（23350）：技能名、等级、魔法（现在/最大）；8 行配方（等级 N 名字 MP）；下面说明、◀ 页 ▶、取消。</summary>
@@ -349,13 +419,17 @@ public partial class ProduceResultWindow : CgWindow
         Txt(_sk.Exp.ToString(), 60, 67);
         Txt(_sk.NextExp.ToString(), 202, 67);
         var lines = new List<string>();
-        string name = _gather ? r.Name : _recipe?.Name ?? "";
+        string name = _gather ? r.Name : r.Type == 2 ? Ui.TargetNameNow : r.Type == 3 ? Ui.TreatName : _recipe?.Name ?? "";
         string msg;
         if (_gather) msg = r.Ok ? "发现了。" : "什么也没发现。";
+        else if (r.Type == 2) msg = $"的{Ui.Verb}{(r.Ok ? "成功了。" : "失败了。")}";
+        else if (r.Type == 3) msg = $"{_sk.Name}{(r.Ok ? "成功了。" : "失败了。")}";
         else msg = r.Ok ? "的合成成功了。" : "的合成失败了。";
         if (name.Length > 0) Txt(name, _gather ? 140 : 134, 96, center: true);
         Txt(msg, 10, 120);
-        if (r.Ok && r.Image > 0 && Cache.ImageNo(r.Image).Tex is { } tex)
+        int img = r.Type == 2 ? Ui.TargetImage : r.Image;
+        if (r.Type == 3 && r.Ok && r.Heal > 0) lines.Add($"回复了{r.Heal}点生命力。");
+        if ((r.Ok || r.Type == 2) && img > 0 && Cache.ImageNo(img).Tex is { } tex)
             Body.AddChild(new TextureRect { Texture = tex, Position = new Vector2(193, 184) - tex.GetSize() / 2, MouseFilter = Control.MouseFilterEnum.Ignore });
         foreach (var l in r.Lost) lines.Add($"{l} 失去了！");
         if (r.Exp > 0) lines.Add($"技能经验值 +{r.Exp}");
@@ -393,5 +467,70 @@ public partial class GatherWindow : CgWindow
         }
         if (Running) { Txt($"{sk.Name}中 . . .", 145, 186, center: true); Btn(23395, 23396, 95, 218, () => Ui.StopGather()); }
         else Btn(23400, 23401, 95, 218, () => Ui.StartGather(sk));
+    }
+}
+
+/// <summary>
+/// 選擇物品（23354，272×440 贴右在 (688,0)，官方 bob 实测）：鉴定 / 修理 / 刻印用。背包 20 格（同選擇素材的格子），
+/// 双击选一件（黄框），下面一行提示（"请选择要鉴定的道具。" → "需消耗10点魔力。" → "鉴定中 . . ."），自己站在 (74,404)，
+/// 按钮 修理 23366 / 鑑定 23369 / 刻印 23372（+1 按下、+2 灰）在 (160,398)。鼠标停在道具上，下半部显示道具名（蓝底）。
+/// </summary>
+public partial class ItemSkillWindow : CgWindow
+{
+    public ProductionUi Ui = null!;
+    public string Message = "";
+    private long _lastClick; private int _lastSlot = -1;
+    private Control? _tip;
+    public override void _Ready() { Layer = 16; Visible = false; Build(new Vector2(688, 0), true); }
+
+    public override void Refresh()
+    {
+        Clear(); _tip = null;
+        var s = Ui.Session(); if (s == null || Ui.Skill == null) return;
+        Img(23354, 0, 0, block: true);
+        Btn(22509, 22510, 246, 6, () => Ui.CloseAll());
+        for (int c = 0; c < 20; c++)
+        {
+            int slot = c + 8; var p = MaterialWindow.Cell(c);
+            var it = s.Player.Items.FirstOrDefault(i => i.Slot == slot);
+            if (it == null) continue;
+            if (it.Graphic > 0 && Cache.ImageNo(it.Graphic).Tex is { } tex)
+                Body.AddChild(new TextureRect { Texture = tex, Position = p + (new Vector2(46, 46) - tex.GetSize()) / 2, MouseFilter = Control.MouseFilterEnum.Ignore });
+            if (it.Count > 1) Txt(it.Count.ToString(), p.X + 44, p.Y + 33, new Color(0.4f, 1, 1), right: true);
+            if (Ui.TargetSlot == slot) Body.AddChild(new YellowBox { Position = p - Vector2.One, Size = new Vector2(48, 48) });
+            if (Ui.Working) continue;
+            var h = Hit(p.X, p.Y, 46, 46, _ => Click(slot));
+            var item = it;
+            h.MouseEntered += () => ShowName(item.Name); h.MouseExited += () => { _tip?.QueueFree(); _tip = null; };
+        }
+        Txt(Message, 8, 270);
+        if (Ui.PlayerAnime() is int an and > 0)
+        {
+            var holder = new Node2D { Position = new Vector2(74, 404) };
+            holder.AddChild(new AnimSprite { Cache = Cache, AnimeId = an, Act = Ui.Working ? 6 : 0, FallbackAct = 0, Dir = 4 });
+            Body.AddChild(holder);
+        }
+        int btn = Ui.Skill.SkillId switch { 219 => 23369, 217 or 218 => 23366, _ => 23372 };
+        if (Ui.Working) Img(btn + 2, 160, 398);
+        else Btn(btn, btn + 1, 160, 398, () => Ui.ExecuteItemSkill());
+    }
+
+    private void ShowName(string name)
+    {
+        _tip?.QueueFree();
+        _tip = new Control { Position = new Vector2(4, 247), MouseFilter = Control.MouseFilterEnum.Ignore };
+        _tip.AddChild(new ColorRect { Color = new Color(0, 0, 0.55f), Size = new Vector2(264, 178), MouseFilter = Control.MouseFilterEnum.Ignore });
+        _tip.AddChild(new ColorRect { Color = new Color(0.85f, 0.75f, 0.55f), Position = new Vector2(0, 21), Size = new Vector2(264, 1), MouseFilter = Control.MouseFilterEnum.Ignore });
+        float w = name.Sum(CgText.Cells) * CgText.CellW;
+        _tip.AddChild(new CgText { Text = name, Position = new Vector2(132 - w / 2, 3) });
+        Body.AddChild(_tip);
+    }
+
+    private void Click(int slot)
+    {
+        long now = (long)Time.GetTicksMsec();
+        bool dbl = slot == _lastSlot && now - _lastClick < 500;
+        _lastClick = now; _lastSlot = slot;
+        if (dbl) Ui.ChooseItem(slot);
     }
 }
