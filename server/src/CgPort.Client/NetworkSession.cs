@@ -217,6 +217,7 @@ public sealed class NetworkSession : IGameSession
                 break;
             case "GmNM":  // CC：进图
                 if (Bank != null) CloseBank();   // 换图（传送）银行窗口就关
+                _stalls.Clear(); if (Browsing != null) { Browsing = null; StallChanged?.Invoke(); }
                 OnMapChange(f);
                 break;
             case "TeD":   // MN：地图名
@@ -230,7 +231,7 @@ public sealed class NetworkSession : IGameSession
                 foreach (var id in rest.Trim().Split(',', StringSplitOptions.RemoveEmptyEntries))
                 {
                     if (_ground.Remove(id)) GroundChanged?.Invoke();
-                    else if (_objects.Remove(id)) ObjectsChanged?.Invoke();
+                    else if (_objects.Remove(id)) { if (_stalls.Remove(D62Safe(id))) StallChanged?.Invoke(); ObjectsChanged?.Invoke(); }
                 }
                 break;
             case "nsY":   // C：周围对象，多个对象用 Tab 分隔
@@ -283,6 +284,18 @@ public sealed class NetworkSession : IGameSession
             case "We":    // TROC：0 中止、1 对方确认、2 完成
                 if (f[0] == "1") { if (Trade != null) { Trade.TheyConfirmed = true; TradeChanged?.Invoke(); } }
                 else { Trade = null; TradeChanged?.Invoke(); TradeEnded?.Invoke(f[0] == "2"); }
+                break;
+            case "Tmrx":  // 摆摊结果：0 成功
+                OnStallStarted(f[0]);
+                break;
+            case "KXhH":  // 收摊结果：0 成功
+                if (f[0] == "0") { Stalling = false; StallChanged?.Invoke(); } else ChatReceived?.Invoke("收摊失败", 4);
+                break;
+            case "ft":    // 浏览摊位
+                OnStallBrowse(f);
+                break;
+            case "Yx":    // 买摊位上的东西：0 成功
+                OnStallBought(f[0]);
                 break;
             case "NI":    // CA：对象动作/移动
                 OnAction(rest.Trim());
@@ -481,6 +494,13 @@ public sealed class NetworkSession : IGameSession
             var p = seg.Split('|');
             if (p.Length < 5) continue;
             if (p[0] == SelfId) continue;   // 自己的位置以本地预测 + QBt 校正为准
+            if (p[3] == "200")   // 摆摊：id|x|y|200|0|1 开张、…|0 收摊（实测）
+            {
+                int sid = D62Safe(p[0]);
+                bool on = p.Length > 5 && p[5] == "1";
+                if (on ? _stalls.Add(sid) : _stalls.Remove(sid)) StallChanged?.Invoke();
+                continue;
+            }
             if (_objects.TryGetValue(p[0], out var n) && int.TryParse(p[1], out var x) && int.TryParse(p[2], out var y))
             {
                 if ((x != n.X || y != n.Y) && FollowTarget == p[0]) Follow(n.X, n.Y);
@@ -489,6 +509,111 @@ public sealed class NetworkSession : IGameSession
                 if (moved) ObjectMoved?.Invoke(_objects[p[0]]);
             }
         }
+    }
+
+    // ———————————————————— 摆摊 ————————————————————
+    // 实测（官方 4.06 bob + 工具 hao，2026-11-09/10），服务端 cgmsv.cf stallflg=1、stallmaps=1000,1500：
+    //   开张 ylGN 描述 描述 价1\\z…价20\\z宠价1\\z…宠价5\\z（背包 20 格按顺序 + 5 只宠物，0 = 不卖）→ Tmrx 0；
+    //     旁人收到 NI id|x|y|200|0|1（头上挂"店铺 贩售中"牌子），收摊 JMh → KXhH 0，旁人 NI …|200|0|0。
+    //   浏览：右键（手机：点）旁边摆摊的人 → ElVN 对象id → ft 0 对象id 描述 描述 物品段 宠物段：
+    //     物品段 = 个数|（价|rU 的 14 段）×N；宠物段 = 只数|（价|宠物栏|IsSy 24 段|?|?|?|AU 19 段|可分配点数|招式数|（编号|名字）×招式数）×N
+    //   买：wAo 格（道具 = 卖家背包格 8 起，宠物 = 宠物栏 0–4）→ Yx 0；成功后官方本地把那格清掉，不重新浏览。
+    //   错误提示（exe 里的顺序；编号对应没逐个试过）：开张 1 最大摊位数已满 2 两次摆摊时间间隔过短 3 已经有人在此摆摊 其他 摆摊失败；
+    //   浏览 1 没有可以浏览的摊位 2 已经收摊 3 正在忙 4 没有找到老板；买 1 没有找到老板 2 摊位已经变更 3 物品空间已满 4 宠物空间已满 5 钱不够（实测：没钱的号买 → Yx 5）6 已经售出 7 老板的钱包已满 其他 购买失败。
+    public sealed record StallItem(int Price, ItemStack Item);
+    public sealed record StallPet(int Price, PetInfo Pet);
+    public sealed class StallView
+    {
+        public int OwnerId; public string OwnerName = ""; public int OwnerAnime; public string Desc = "";
+        public List<StallItem> Items = new(); public List<StallPet> Pets = new();
+    }
+    private readonly HashSet<int> _stalls = new();
+    public bool IsStall(int objId) => _stalls.Contains(objId);
+    public IReadOnlyCollection<int> Stalls => _stalls;
+    public bool Stalling { get; private set; }
+    public StallView? Browsing { get; private set; }
+    public event Action? StallChanged;
+    private int _browseTarget;
+
+    private static readonly string[] StallStartErr = { "", "这个子星最大摊位数已满", "两次摆摊时间间隔过短", "已经有人在此摆摊" };
+    private static readonly string[] StallBrowseErr = { "", "没有可以浏览的摊位", "浏览的摊位已经收摊", "浏览的摊位正在忙，请稍后再试", "没有找到老板" };
+    private static readonly string[] StallBuyErr = { "", "没有找到老板", "老板的摊位已经变更", "您的物品空间已满", "您的宠物空间已满", "您的钱不够", "要买的东西已经售出", "老板的钱包已满" };
+    private static string Pick(string[] t, string code, string other) => int.TryParse(code, out var n) && n > 0 && n < t.Length ? t[n] : other;
+
+    /// <summary>开张：itemPrices 键是背包格（8–27），petPrices 键是宠物栏（0–4），价钱 0 = 不卖。</summary>
+    public void StallStart(string desc, IReadOnlyDictionary<int, int> itemPrices, IReadOnlyDictionary<int, int> petPrices)
+    {
+        if (string.IsNullOrWhiteSpace(desc)) desc = "未写描述的店铺";
+        var d = desc.Replace("\\", "\\\\").Replace(" ", "\\S");
+        var sb = new StringBuilder();
+        for (int i = 0; i < 20; i++) sb.Append(itemPrices.TryGetValue(i + 8, out var v) ? v : 0).Append("\\\\z");
+        for (int i = 0; i < 5; i++) sb.Append(petPrices.TryGetValue(i, out var v) ? v : 0).Append("\\\\z");
+        Send("ylGN", d, d, sb.ToString());
+    }
+    public void StallEnd() => Send("JMh");
+
+    private void OnStallStarted(string code)
+    {
+        if (code == "0") { Stalling = true; StallChanged?.Invoke(); }
+        else ChatReceived?.Invoke(Pick(StallStartErr, code, "摆摊失败"), 4);
+    }
+
+    /// <summary>浏览旁边的摊位（官方：右键点摆摊的人，先转过去面对他）。</summary>
+    public void StallBrowse(int objId)
+    {
+        if (_objects.Values.FirstOrDefault(o => o.Id == objId) is { } o && Math.Max(Math.Abs(o.X - X), Math.Abs(o.Y - Y)) <= 1) Face(o.X - X, o.Y - Y);
+        _browseTarget = objId;
+        Send("ElVN", B62(objId));
+    }
+
+    private void OnStallBrowse(string[] f)
+    {
+        if (f.Length < 1 || f[0] != "0") { ChatReceived?.Invoke(Pick(StallBrowseErr, f.Length > 0 ? f[0] : "", "没有可以浏览的摊位"), 4); return; }
+        var v = new StallView { OwnerId = f.Length > 1 ? D62Safe(f[1]) : _browseTarget, Desc = f.Length > 2 ? Unesc(f[2]) : "" };
+        if (_objects.Values.FirstOrDefault(o => o.Id == v.OwnerId) is { } o) { v.OwnerName = o.Name; v.OwnerAnime = o.AppearanceId; }
+        if (f.Length > 4)
+        {
+            var t = f[4].Split('|');
+            int n = int.TryParse(t[0], out var nn) ? nn : 0, i = 1;
+            for (int k = 0; k < n && i + 13 < t.Length; k++, i += 15)
+                if (ParseItem(t, i + 1) is { } it) v.Items.Add(new StallItem(int.TryParse(t[i], out var pr) ? pr : 0, it));
+        }
+        if (f.Length > 5)
+        {
+            var t = f[5].Split('|');
+            int n = int.TryParse(t[0], out var nn) ? nn : 0, i = 1;
+            for (int k = 0; k < n && i + 49 < t.Length; k++)
+            {
+                var pet = new PetInfo { Slot = int.TryParse(t[i + 1], out var sl) ? sl : 0 };
+                ApplyPet(pet, t[(i + 2)..(i + 26)]);
+                ApplyPetParam(pet, new[] { "1" }.Concat(t[(i + 29)..(i + 48)]).ToArray());
+                pet.Points = int.TryParse(t[i + 48], out var pts) ? pts : 0;
+                int tc = int.TryParse(t[i + 49], out var tcn) ? tcn : 0;
+                for (int j = 0; j < tc && i + 51 + 2 * j < t.Length; j++)
+                    pet.Techs.Add(new TechInfo { Name = Unesc(t[i + 51 + 2 * j]) });
+                v.Pets.Add(new StallPet(int.TryParse(t[i], out var pr) ? pr : 0, pet));
+                i += 50 + 2 * tc;
+            }
+        }
+        Browsing = v;
+        StallChanged?.Invoke();
+    }
+
+    private int _buying = -1;
+    /// <summary>买：道具给卖家的背包格（8 起），宠物给宠物栏（0–4）。</summary>
+    public void StallBuy(int slot) { _buying = slot; Send("wAo", B62(slot)); }
+    public void CloseStallBrowse() { Browsing = null; StallChanged?.Invoke(); }
+
+    private void OnStallBought(string code)
+    {
+        if (code == "0" && Browsing != null)
+        {
+            if (_buying >= 8) Browsing.Items.RemoveAll(x => x.Item.Slot == _buying);
+            else Browsing.Pets.RemoveAll(x => x.Pet.Slot == _buying);
+        }
+        else if (code != "0") ChatReceived?.Invoke(Pick(StallBuyErr, code, "购买失败"), 4);
+        _buying = -1;
+        StallChanged?.Invoke();
     }
 
     // ———————————————————— 名片 / 邮件 ————————————————————
@@ -1291,6 +1416,13 @@ public sealed class NetworkSession : IGameSession
         var pet = Player.Pets.FirstOrDefault(p => p.Slot == slot);
         if (mask == 0) { if (pet != null) Player.Pets.Remove(pet); return; }
         if (pet == null) { pet = new PetInfo { Slot = slot }; Player.Pets.Add(pet); Player.Pets.Sort((x, y) => x.Slot.CompareTo(y.Slot)); }
+        ApplyPet(pet, a);
+    }
+
+    /// <summary>IsSy 的掩码|值…填进一只宠物（摆摊浏览 ft 里也是这个格式）。</summary>
+    private static void ApplyPet(PetInfo pet, string[] a)
+    {
+        long mask = (uint)D62Safe(a[0]);
         var vals = new Dictionary<int, string>();
         if (mask == 1) for (int i = 1; i < a.Length; i++) vals[i] = a[i];
         else { int k = 1; for (int bit = 1; bit < 32; bit++) if (((mask >> bit) & 1) != 0 && k < a.Length) vals[bit] = a[k++]; }
@@ -1329,7 +1461,12 @@ public sealed class NetworkSession : IGameSession
         if (f.Length < 2 || !int.TryParse(f[0], out var slot)) return;
         var pet = Player.Pets.FirstOrDefault(p => p.Slot == slot);
         if (pet == null) return;
-        var a = string.Join(' ', f.Skip(1)).Split('|');
+        ApplyPetParam(pet, string.Join(' ', f.Skip(1)).Split('|'));
+        StatusChanged?.Invoke();
+    }
+
+    private static void ApplyPetParam(PetInfo pet, string[] a)
+    {
         long mask = (uint)D62Safe(a[0]);
         var vals = new Dictionary<int, string>();
         if (mask == 1) for (int i = 1; i < a.Length; i++) vals[i] = a[i];
@@ -1346,7 +1483,6 @@ public sealed class NetworkSession : IGameSession
                 case 18: pet.LoadMax = n; break;
             }
         }
-        StatusChanged?.Invoke();
     }
 
     /// <summary>iKe 宠物栏 装备格|道具（格式同 rU）。</summary>

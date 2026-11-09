@@ -233,6 +233,7 @@ public partial class Main : Node2D
             if (id == 22585) ns.PartyButton();
             else if (id == 22587) ns.ExchangeCard();
             else if (id == 22589) ns.RequestTrade();
+            else if (id == 244003) ToggleStall();
         };
         // 名片簿 / 写信 / 邮件记录 / 删除确认
         _cardBook = new CardBookWindow { Cache = _cache, Session = () => _session as NetworkSession };
@@ -282,6 +283,19 @@ public partial class Main : Node2D
         if (_session is NetworkSession nsS) nsS.SkillShopChanged += () => _skillShop.Refresh();
         _bank = new BankWindow { Cache = _cache, Session = () => _session as NetworkSession };
         AddChild(_bank);
+        // 摆摊 / 浏览摊位
+        _stall = new StallWindow { Cache = _cache, Session = () => _session as NetworkSession, PlayerAnime = () => _player.AnimeId };
+        AddChild(_stall);
+        if (_session is NetworkSession nsSt)
+        {
+            nsSt.StallChanged += () =>
+            {
+                if (nsSt.Browsing != null && !_stall.Visible) _stall.OpenBrowse();
+                else if (_stall.Visible) _stall.Refresh();
+                SpawnNpcs();
+            };
+            nsSt.StatusChanged += () => { if (_stall.Visible && !_stall.Pricing) _stall.Refresh(); };
+        }
         if (_session is NetworkSession nsB)
         {
             nsB.BankChanged += () => { if (nsB.Bank == null) _bank.Visible = false; else if (!_bank.Visible) _bank.Open(); else _bank.Refresh(); };
@@ -529,6 +543,12 @@ public partial class Main : Node2D
             // 静态图像的名字放在图像上方，动画角色用固定高度
             float top = node is Sprite2D { Texture: not null } sp && node is not AnimSprite ? sp.Offset.Y - 14 : -92;
             if (!string.IsNullOrEmpty(n.Name)) node.AddChild(NameTag.Make(n.Name, NameTag.NpcColor, top));
+            // 摆摊中：头上"店铺 贩售中"牌子 98895（名字上方），名字下面橙字"玩家店铺"（官方实测）
+            if (_session is NetworkSession nss && nss.IsStall(n.Id))
+            {
+                if (_cache.ImageNo(98895).Tex is { } sign) node.AddChild(new Sprite2D { Texture = sign, Centered = false, Position = new Vector2(-24, top - 51), ZIndex = 50 });
+                node.AddChild(NameTag.Make("玩家店铺", new Color(1f, 0.6f, 0.1f), top + 18));
+            }
             _view.Entities.AddChild(node);
             _npcNodes.Add(node);
             _npcById[n.Id] = (node, n);
@@ -536,6 +556,15 @@ public partial class Main : Node2D
     }
 
     private readonly Dictionary<int, (Node2D Node, Npc Npc)> _npcById = new();
+    private StallWindow _stall = null!;
+    public StallWindow StallUi => _stall;
+
+    /// <summary>右上第 6 个按钮 / Ctrl+B：打开自己的摆摊窗口（再按关掉）。</summary>
+    public void ToggleStall()
+    {
+        if (_session is not NetworkSession || _session.InBattle) return;
+        if (_stall.Visible) _stall.Close(); else _stall.OpenOwn();
+    }
 
     /// <summary>别的玩家/NPC 走了一步：只挪这一个，播走路动作，走完换回站立。</summary>
     private void OnObjectMoved(Npc n)
@@ -618,6 +647,8 @@ public partial class Main : Node2D
     private void BeginTalk(Npc npc)
     {
         _talkTarget = null;
+        // 摆摊的人：官方右键（手机：点）他 = 浏览摊位（ElVN）
+        if (_session is NetworkSession nsb && nsb.IsStall(npc.Id)) { nsb.StallBrowse(npc.Id); return; }
         _talkingTo = npc.Name;
         _session.TalkTo(npc.Id);
     }
@@ -720,6 +751,7 @@ public partial class Main : Node2D
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.L } && _session is NetworkSession nsl) nsl.PartyButton();   // 官方 Ctrl+L 组队
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.Semicolon } && _session is NetworkSession nsc) nsc.ExchangeCard();   // 官方 Ctrl+; 交换名片
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.Apostrophe } && _session is NetworkSession nst) nst.RequestTrade();   // 官方 Ctrl+' 交易
+        else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.B }) ToggleStall();   // 官方 Ctrl+B 摆摊
         else if (e is InputEventKey ck && _chatIn != null && _chatIn.TryStart(ck)) GetViewport().SetInputAsHandled();   // 直接打字 = 聊天（官方同）
         else if (e is InputEventKey { Pressed: true, Keycode: Key.F2 }) _calib?.Toggle();
         else if (e is InputEventKey { Pressed: true, Keycode: Key.F10 }) AddChild(new SetupScreen { Layer = 50 });   // 重新设置（切换单机/联网、改服务器）

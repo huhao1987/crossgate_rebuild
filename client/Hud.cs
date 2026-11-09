@@ -8,7 +8,7 @@ namespace CgPort.Godot;
 /// 官方界面（主画面 HUD），用原版图档拼出来。图像编号和位置是把官方客户端截图与它实际读取的图像做模板匹配得到的
 /// （官方窗口 960×720；右侧元素按右边缘对齐，底栏贴底部）：
 ///   22570 左上状态面板 (0,0)
-///   22581/22583/22585/22587/22589 右上 5 个功能按钮，x = 717/747/777/807/837（相对 960 宽），y = 4
+///   22581/22583/22585/22587/22589 右上 5 个功能按钮，x = 717/747/777/807/837（相对 960 宽），y = 4；第 6 个 244003 摆摊 (867,7)
 ///   22561 "小" (808,37)、22591 "動作" (827,37)
 ///   22560 底栏 640×24，贴底，从右往左平铺
 /// 找不到图档（例如占位素材）时整个 HUD 不显示，退回调试文字。
@@ -97,13 +97,14 @@ public partial class Hud : CanvasLayer
             hit.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } || e is InputEventScreenTouch { Pressed: true }) FlagClicked?.Invoke(bit); };
             panel.AddChild(hit);
         }
-        int[] btns = { 22581, 22583, 22585, 22587, 22589 };
-        int[] xs = { 717, 747, 777, 807, 837 };
+        // 第 6 个 244003 = 摆摊 Ctrl+B（20×20，在 (867,7)，官方 4.06 实测）
+        int[] btns = { 22581, 22583, 22585, 22587, 22589, 244003 };
+        int[] xs = { 717, 747, 777, 807, 837, 867 };
         for (int i = 0; i < btns.Length; i++)
         {
             var t = Img(btns[i]);
             if (t == null) continue;
-            AnchorRight(t, xs[i] - 960, 4); t.MouseFilter = Control.MouseFilterEnum.Stop;
+            AnchorRight(t, xs[i] - 960, btns[i] == 244003 ? 7 : 4); t.MouseFilter = Control.MouseFilterEnum.Stop;
             int id = btns[i];
             t.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) ButtonPressed?.Invoke(id); };
             root.AddChild(t); _top.Add(t);
