@@ -164,6 +164,8 @@ public partial class Main : Node2D
     private BoardWindow _board = null!;
     private PetSkillShopWindow _petShop = null!;
     private BuryWindow _bury = null!;
+    private HintBar _hint = null!;
+    public HintBar Hint => _hint;
     public PetSkillShopWindow PetShop => _petShop;
     public BoardWindow Board => _board;
     public HealWindow Heal => _heal;
@@ -554,6 +556,7 @@ public partial class Main : Node2D
         AddChild(_petShop);
         _bury = new BuryWindow { Cache = _cache, Items = () => _session.Player.Items, Submit = a => _session.Answer("data:" + a) };
         AddChild(_bury);
+        _hint = new HintBar(); AddChild(_hint);
         AddChild(_shop);
         _shopMenu = new ShopMenuWindow { Cache = _cache, StandAct = _cfg.ActStand, Choose = i => _session.Answer($"opt:{i}") };
         AddChild(_shopMenu);

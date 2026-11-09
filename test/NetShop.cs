@@ -47,6 +47,11 @@ public partial class NetShop : SceneTree
                 _gold0 = s!.Player.Gold; _items0 = s.Player.Items.Sum(i => i.Count);
                 w.Add(0, 1); w.Add(0, 1); w.Add(1, 1); w.Add(1, -1);
                 Check(w.Quantities[0] == 2 && w.Quantities[1] == 0, $"▲▲ ▲▼：{string.Join(",", w.Quantities)}");
+                // 鼠标移到「◀」上（窗口 (192,132) + (147,52)）→ 左下提示栏显示"切换页数。"
+                Input.ParseInputEvent(new InputEventMouseMotion { Position = new Vector2(192 + 147, 132 + 52), GlobalPosition = new Vector2(192 + 147, 132 + 52) });
+                _st = 30; _f = 0; break;
+            case 30 when _f == 5:
+                Check(_m.Hint.Current == "切换页数。", $"提示栏：「{_m.Hint.Current}」");
                 Shot("2_buy"); w.Ok(); _st = 4; _f = 0; break;
             case 3 when _f > 600: Check(false, "买窗口没出来"); return End();
             case 4 when _f == 20:
