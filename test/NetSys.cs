@@ -39,7 +39,14 @@ public partial class NetSys : SceneTree
             case 1 when _f == 15:
                 Check(_m.SystemWin.Visible, "系统窗口打开");
                 Root.GetTexture().GetImage().SavePng("res://test/out_system.png");
-                _m.SystemWin.Chosen!(0); _st = 2; _f = 0; break;
+                _m.SystemWin.Chosen!(0); _st = 20; _f = 0; break;
+            case 20 when _f == 15:
+                Check(_m.SystemWin.Page == 0, "登出 → 登出页（回到城内登入点 / 服务器选择界面）");
+                Root.GetTexture().GetImage().SavePng("res://test/out_system_logout.png");
+                _m.SystemWin.LoginPoint!(); _st = 21; _f = 0; break;
+            case 21 when _f == 90:
+                Check(_m.Chat.Lines.Any(l => l.Contains("注销回到登陆点")), $"回到城内登入点：{string.Join(" / ", _m.Chat.Lines.TakeLast(2))}");
+                _m.SystemWin.Logout!(); _st = 2; _f = 0; break;
             case 2 when _f == 60:
                 var log = string.Join("\n", Directory.GetFiles("/home/claude/wine/cgmsv/log", "packet_*.txt").OrderBy(x => x).TakeLast(1).SelectMany(File.ReadLines).Where(l => l.Contains("\ttest1\t") && string.CompareOrdinal(l[..8], _since) >= 0));
                 Check(log.Contains("[Recv]") && log.Split('\n').Any(l => l.Contains("[Recv]") && l.TrimEnd().EndsWith("WA")), "服务端收到登出 WA");

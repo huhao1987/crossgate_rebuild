@@ -33,7 +33,8 @@ public static class MapTools
 
 /// <summary>
 /// 自動尋路列表（exe PNG 208，272×438，贴右上 (688,0)）：当前地图的坐标点每页 8 条（行 y = 79 + 25k，x 22–219），
-/// 右边「設定」（BMP 211/212）改这一条；点名字 = 选它当目的地；◀▶ 22763/22764 翻页；
+/// 右边「設定」（BMP 211/212）改这一条（空行的設定 = 新增一条）；点名字 = 选它当目的地；◀▶ 22763/22764 翻页，
+/// 官方固定 8 页（每张地图 64 条，空行也画），到头不回绕（实测法兰城 25 条也显示 "1/8"）；
 /// 目的座標 東 南 可以直接填，「確認」23216；「執行」23360 开始走；「上一頁」22714 回小地图。
 /// </summary>
 public partial class AutoPathWindow : CgWindow
@@ -64,18 +65,24 @@ public partial class AutoPathWindow : CgWindow
         if (map == null) return;
         Txt(name, 81, 53);
         var list = Mine(map.Id);
-        int pages = Math.Max(1, (list.Count + 7) / 8);
+        const int pages = Pages;
         _page = Math.Clamp(_page, 0, pages - 1);
         for (int k = 0; k < 8; k++)
         {
-            int i = _page * 8 + k; if (i >= list.Count) break;
-            var p = list[i]; float y = 79 + 25 * k;
+            int i = _page * 8 + k; float y = 79 + 25 * k;
+            if (i >= list.Count)
+            {
+                var (_, px, py, _) = Where();
+                BtnTex(ExeArt.Bmp(211), ExeArt.Bmp(212), 227, y + 1, () => Edit?.Invoke(NewPoint(map.Id, px, py)));
+                continue;
+            }
+            var p = list[i];
             Txt(p.Name, 40, y + 6);
             Hit(22, y, 197, 20, _ => SetTarget(new Vector2I(p.X, p.Y)));
             BtnTex(ExeArt.Bmp(211), ExeArt.Bmp(212), 227, y + 1, () => Edit?.Invoke(p));
         }
-        Btn(22763, 22763, 129, 285, () => { _page = (_page + pages - 1) % pages; Refresh(); });
-        Btn(22764, 22764, 212, 285, () => { _page = (_page + 1) % pages; Refresh(); });
+        Btn(22763, 22763, 129, 285, () => { if (_page > 0) { _page--; Refresh(); } });
+        Btn(22764, 22764, 212, 285, () => { if (_page < pages - 1) { _page++; Refresh(); } });
         Txt($"{_page + 1}/{pages}", 176, 291, center: true);
         _ex = Field(_target?.X.ToString() ?? "0", 48, 323);
         _ey = Field(_target?.Y.ToString() ?? "0", 121, 323);
@@ -97,9 +104,18 @@ public partial class AutoPathWindow : CgWindow
         Body.AddChild(e); return e;
     }
 
-    public void TestPage(int d) { _page += d; Refresh(); }
+    public const int Pages = 8;
+    /// <summary>空行点「設定」：先占一条（重用文件里没用的记录，没有就加在后面），设定窗口「確認」后才算有效（Used = 1）。</summary>
+    private MapPoint NewPoint(int map, int x, int y)
+    {
+        var p = Points.FirstOrDefault(q => q.Used == 0) ?? new MapPoint();
+        if (!Points.Contains(p)) Points.Add(p);
+        p.Used = 0; p.Tag = 0; p.Map = map; p.X = x; p.Y = y; p.Name = "";
+        return p;
+    }
+    public void TestPage(int d) { _page = Math.Clamp(_page + d, 0, Pages - 1); Refresh(); }
     public Vector2I? Target => _target;
-    public int PageCount => Where().Map is { } m ? Math.Max(1, (Mine(m.Id).Count + 7) / 8) : 0;
+    public int PageCount => Where().Map != null ? Pages : 0;
 }
 
 /// <summary>設置地圖座標點（exe PNG 213，272×152，(688,0)）：座標名 / 東 / 南，红钮（BMP 197）= 删掉这一条，「確認」23216 存。</summary>
@@ -125,7 +141,7 @@ public partial class PointEditWindow : CgWindow
         Btn(23216, 23216, 208, 121, () =>
         {
             if (!int.TryParse(_x.Text, out var x) || !int.TryParse(_y.Text, out var y)) return;
-            p.Name = _name.Text.Trim(); p.X = x; p.Y = y; Visible = false; Saved?.Invoke();
+            p.Name = _name.Text.Trim(); p.X = x; p.Y = y; p.Used = 1; Visible = false; Saved?.Invoke();
         });
     }
 

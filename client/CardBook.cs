@@ -67,18 +67,25 @@ public partial class MailEditWindow : CgWindow
     public override void _Ready()
     {
         Layer = 13; Visible = false; Build(Vector2.Zero, false);
-        _edit = new TextEdit
+        _edit = MakeEdit();
+        Win.AddChild(_edit);
+    }
+
+    /// <summary>写信区（普通 / 宠物邮件共用）：(8,226) 256×196，白字，最多 140 字。</summary>
+    public static TextEdit MakeEdit()
+    {
+        var edit = new TextEdit
         {
             Position = new Vector2(8, 226), Size = new Vector2(256, 196), WrapMode = TextEdit.LineWrappingMode.Boundary,
             ContextMenuEnabled = false, PlaceholderText = "",
         };
         var clear = new StyleBoxEmpty();
-        foreach (var n in new[] { "normal", "focus", "read_only" }) _edit.AddThemeStyleboxOverride(n, clear);
-        _edit.AddThemeColorOverride("font_color", Colors.White);
-        _edit.AddThemeColorOverride("caret_color", Colors.White);
-        _edit.AddThemeFontSizeOverride("font_size", 15);
-        _edit.TextChanged += () => { if (_edit.Text.Length > 140) { _edit.Text = _edit.Text[..140]; _edit.SetCaretColumn(_edit.Text.Length); } };
-        Win.AddChild(_edit);
+        foreach (var n in new[] { "normal", "focus", "read_only" }) edit.AddThemeStyleboxOverride(n, clear);
+        edit.AddThemeColorOverride("font_color", Colors.White);
+        edit.AddThemeColorOverride("caret_color", Colors.White);
+        edit.AddThemeFontSizeOverride("font_size", 15);
+        edit.TextChanged += () => { if (edit.Text.Length > 140) { edit.Text = edit.Text[..140]; edit.SetCaretColumn(edit.Text.Length); } };
+        return edit;
     }
 
     public void Open(int cardIndex)
@@ -120,13 +127,28 @@ public partial class MailEditWindow : CgWindow
     }
 }
 
-/// <summary>邮件记录（名片上点「記錄」）：背景 23190 在 (0,0)，上面是对方头像/等级/名字，下面按时间列出来往的信。</summary>
+/// <summary>
+/// 邮件记录（名片上点「記錄」，有新信时点左上「郵件」也直接开这里；官方 exe 0x446f80 起 + 截图）：背景 23190 在 (0,0)。
+/// 上面对方头像 (7,36) 64×72、等级从 x 150、名字中心 (167,72)。一页一封（最新的在第 1 页），共 10 页：
+/// 「郵件」23101 中心 (60,140)（回信 → 编辑邮件）、日期从 (130,132)、内容从 (16,182)；
+/// 底下 ◀ 22881 中心 (28,410)、页码中心 (76,409)、▶ 22883 中心 (125,410)、「上一頁」22714 中心 (200,410)（回名片簿）。
+/// </summary>
 public partial class MailRecordWindow : CgWindow
 {
     public Func<NetworkSession?> Session = () => null;
-    private int _card;
+    public Action<int>? Reply;
+    public Action? Back;
+    private int _card, _page;
+    public int Page => _page;
+    public const int Pages = 10;
     public override void _Ready() { Layer = 13; Visible = false; Build(Vector2.Zero, false); }
-    public void Open(int card) { _card = card; Visible = true; Refresh(); }
+    public void Open(int card) { _card = card; _page = 0; Visible = true; Refresh(); }
+
+    private TextureButton? BtnC(int img, int pressed, float cx, float cy, Action a)
+    {
+        var sz = Cache.ImageNo(img).Tex?.GetSize() ?? Vector2.Zero;
+        return Btn(img, pressed, cx - sz.X / 2, cy - sz.Y / 2, a);
+    }
 
     public override void Refresh()
     {
@@ -141,18 +163,21 @@ public partial class MailRecordWindow : CgWindow
                 var sz = face.GetSize();
                 Body.AddChild(new TextureRect { Texture = face, Position = new Vector2(7 + (64 - sz.X) / 2, 36 + (72 - sz.Y) / 2), MouseFilter = Control.MouseFilterEnum.Ignore });
             }
-            Txt(c.Level.ToString(), 207, 46, right: true);
-            Txt(c.Name, 99, 66);
+            Txt(c.Level.ToString(), 150, 53);
+            Txt(c.Name, 167, 72, center: true);
         }
-        float y = 120;
-        foreach (var m in s.Mails.Where(m => m.CardIndex == _card).Reverse())
+        var list = s.Mails.Where(m => m.CardIndex == _card).Reverse().ToList();
+        if (_page < list.Count)
         {
-            if (y > 400) break;
-            Txt(m.Date, 12, y, m.Incoming ? new Color(0, 1, 1) : new Color(1, 1, 0));
-            var t = new CgText { Wrap = 30, FontColor = Colors.White, Text = m.Text, Position = new Vector2(12, y + 13) };
-            Body.AddChild(t);
-            y += 22 + t.LineCount * t.LineHeight;
+            var m = list[_page];
+            Txt(m.Date, 130, 132, m.Incoming ? Colors.White : new Color(1, 1, 0));
+            Body.AddChild(new CgText { Wrap = 30, FontColor = Colors.White, Text = m.Text, Position = new Vector2(16, 178) });
         }
+        BtnC(23101, 23102, 60, 140, () => { Visible = false; Reply?.Invoke(_card); });
+        BtnC(22881, 22882, 28, 410, () => { _page = (_page + Pages - 1) % Pages; Refresh(); });
+        BtnC(22883, 22884, 125, 410, () => { _page = (_page + 1) % Pages; Refresh(); });
+        Txt($"{_page + 1}/{Pages}", 76, 409, center: true);
+        BtnC(22714, 22715, 200, 410, () => { Visible = false; Back?.Invoke(); });
         Btn(22509, 22510, 246, 6, () => Visible = false);
     }
 }

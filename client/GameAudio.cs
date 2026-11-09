@@ -108,6 +108,9 @@ public partial class GameAudio : Node
         if (id > 0) PlaySe(id);
     }
 
+    /// <summary>界面音效（官方 0x44fc43）：55 错误、59 送出、79 选中。</summary>
+    public static void Se(int id) => I?.PlaySe(id);
+
     public void PlaySe(int id, float vol = 1)
     {
         PlayedSe.Add(id); if (PlayedSe.Count > 50) PlayedSe.RemoveAt(0);

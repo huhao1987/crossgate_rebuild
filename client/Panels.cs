@@ -283,6 +283,7 @@ public partial class ChatInput : CanvasLayer
         _edit.AddThemeStyleboxOverride("normal", new StyleBoxEmpty()); _edit.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
         _edit.TextSubmitted += t =>
         {
+            if (_emojiPanel != null) { _emojiPanel.QueueFree(); _emojiPanel = null; }
             if (t.Trim().Length > 0) Send?.Invoke(t.Trim());
             _edit.Clear(); _edit.ReleaseFocus(); Redraw();
             DisplayServer.VirtualKeyboardHide();
@@ -307,7 +308,45 @@ public partial class ChatInput : CanvasLayer
             AddChild(full);
             full.AddChild(btn);
             _button = btn;
+            // 手机上打 %字母 不方便：「表情」按钮弹出 36 个表情（exe PNG 103），点一个就把 %字母 插进输入行（官方没有这个面板）
+            var emo = new Button { Text = "表情", FocusMode = Control.FocusModeEnum.None,
+                AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1, OffsetLeft = -164, OffsetRight = -90, OffsetTop = -66, OffsetBottom = -30 };
+            emo.AddThemeFontSizeOverride("font_size", 16);
+            emo.Pressed += ToggleEmoji;
+            full.AddChild(emo);
+            _emojiParent = full;
         }
+    }
+
+    private Control? _emojiParent, _emojiPanel;
+    public bool EmojiOpen => _emojiPanel != null;
+    /// <summary>表情面板：10 列 × 4 行，每格 36×36（18×18 的图放大 2 倍），在「聊天」按钮上面。</summary>
+    public void ToggleEmoji()
+    {
+        if (_emojiPanel != null) { _emojiPanel.QueueFree(); _emojiPanel = null; return; }
+        if (_emojiParent == null || ExeArt.Png(103) is not { } sheet) return;
+        int n = sheet.GetWidth() / 18 * (sheet.GetHeight() / 18);
+        n = Math.Min(n, 52);
+        int rows = (n + 9) / 10;
+        var panel = new Panel { AnchorLeft = 1, AnchorRight = 1, AnchorTop = 1, AnchorBottom = 1, OffsetLeft = -8 - 10 * 38 - 8, OffsetRight = -8, OffsetTop = -72 - rows * 38 - 8, OffsetBottom = -72 };
+        panel.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color(0, 0, 0.2f, 0.85f), BorderColor = new Color(0.85f, 0.7f, 0.4f), BorderWidthLeft = 2, BorderWidthRight = 2, BorderWidthTop = 2, BorderWidthBottom = 2 });
+        for (int i = 0; i < n; i++)
+        {
+            var at = new AtlasTexture { Atlas = sheet, Region = new Rect2(18 * (i % 10), 18 * (i / 10), 18, 18) };
+            var b = new TextureButton { TextureNormal = at, IgnoreTextureSize = true, StretchMode = TextureButton.StretchModeEnum.KeepAspectCentered, Position = new Vector2(8 + 38 * (i % 10), 8 + 38 * (i / 10)), Size = new Vector2(36, 36), FocusMode = Control.FocusModeEnum.None };
+            char code = i < 26 ? (char)('A' + i) : (char)('a' + i - 26);
+            b.Pressed += () => InsertEmoji(code);
+            panel.AddChild(b);
+        }
+        _emojiParent.AddChild(panel);
+        _emojiPanel = panel;
+    }
+    public void InsertEmoji(char code)
+    {
+        if (!_edit.HasFocus()) _edit.GrabFocus();
+        _edit.InsertTextAtCaret("%" + code);
+        Redraw();
+        if (_button != null) _button.Text = "发送";
     }
     /// <summary>手机模式显示「聊天」按钮。</summary>
     public bool ShowButton;

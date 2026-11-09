@@ -198,8 +198,14 @@ public sealed class NetworkSession : IGameSession
 
     // ———————————————————— 封包处理 ————————————————————
 
+    /// <summary>当作收到这一行（已解密的明文）：测试用，战斗录像回放也用它（离线会话，不连服务端）。</summary>
+    public void TestFeed(string line) => Handle(line);
+    /// <summary>录像回放用：设定"我"的名字（决定战斗里哪个是自己）。</summary>
+    public void SetReplayName(string name) => Player.Name = name;
+
     private void Handle(string line)
     {
+        RecordLine(line);
         int sp = line.IndexOf(' ');
         string head = sp < 0 ? line : line[..sp];
         string rest = sp < 0 ? "" : line[(sp + 1)..];
@@ -280,8 +286,11 @@ public sealed class NetworkSession : IGameSession
             case "vI":    // ABI：更新一张名片 "序号 1|名字|称号|?|等级|在线|头像|…"
                 if (f.Length >= 2 && int.TryParse(f[0], out var ci)) { SetCard(ci, string.Join(' ', f.Skip(1)).Split('|'), 0); CardsChanged?.Invoke(); }
                 break;
-            case "Mhbt":  // MSG：收到邮件 "名片序号 日期|内容|-1 0"
+            case "Mhbt":  // MSG：收到邮件 "名片序号 日期|内容|-1 0"；宠物邮件 "日期|内容|宠物图像|等级|宠物名|道具图像(-1 没带) 0"
                 OnMail(f);
+                break;
+            case "lDuJ":  // PME：宠物邮件的宠物出发 / 到达（见 OnPetMailEffect）
+                OnPetMailEffect(f);
                 break;
             case "Cxo":   // TRPL：可交易的对象名单 "hao|bob|"
                 TradeCandidates = rest.Trim().Split('|', StringSplitOptions.RemoveEmptyEntries).Select(Unesc).ToList();
@@ -383,6 +392,7 @@ public sealed class NetworkSession : IGameSession
                 break;
             case "dAgg":  // EN：进入战斗（"dAgg 0 0" = 对战/突袭失败，官方随后 "Zd 突发战斗失败"）
                 if (f.Length > 0 && f[0] == "0") break;
+                BattleType = f.Length > 0 ? D62Safe(f[0]) : 0;
                 InBattle = true; _battleShown = false; _turn = 0; _units.Clear(); _down.Clear(); _lastTurnAnswered = -1;
                 break;
             case "LYIm":  // B：战斗
@@ -581,6 +591,20 @@ public sealed class NetworkSession : IGameSession
         return true;
     }
     /// <summary>这个服务端（致敬经典）的「整理」背包按钮：CUSTOMXB 0（官方 4.06 没有）。</summary>
+    /// <summary>
+    /// 背包页（这个私服客户端加的「背包1–4」，服务端 cg_bag.lua 收 SWITM 页号 0–3，实测 "SWITM 2" → 整页 rU 8–27）。
+    /// 官方：点别的页才发；服务端换页成功会发整页 rU，这时高亮才换到新页（被服务端拦下时没有 rU，高亮不动）。
+    /// </summary>
+    public int BagPage { get; private set; }
+    private int _bagRequested;
+    public event Action? BagPageChanged;
+    public void SwitchBag(int page)
+    {
+        if (page is < 0 or > 3 || page == _bagRequested) return;
+        _bagRequested = page;
+        Send("SWITM", page.ToString());
+    }
+
     public void SortBag() => Send("CUSTOMXB", "0");
     /// <summary>右上「功能」第 code 项（1 佣兵 2 银行 … 8 高速 … 23 佣兵血魔），这个服务端的扩展。</summary>
     public void CustomFunction(int code) => Send("CUSTOMXB", code.ToString());
@@ -956,7 +980,15 @@ public sealed class NetworkSession : IGameSession
     //   收信：MSG "Mhbt 名片序号 日期|内容|-1 0"（对方不在线时，等他上线再发；日期例 "2026/11/\S4\S\S9:02"）。
 
     public sealed record AddressCard(int Index, string Name, string Title, int Level, bool Online, int Portrait);
-    public sealed record Mail(int CardIndex, string Name, string Date, string Text, bool Incoming);
+    public sealed record Mail(int CardIndex, string Name, string Date, string Text, bool Incoming)
+    {
+        /// <summary>宠物邮件：送信宠物的图像、等级、名字，带的道具图像（-1 没带）。普通邮件 PetImage = 0。</summary>
+        public int PetImage { get; init; }
+        public int PetLevel { get; init; }
+        public string PetName { get; init; } = "";
+        public int ItemImage { get; init; } = -1;
+        public bool IsPet => PetImage > 0;
+    }
     private readonly AddressCard?[] _cards = new AddressCard?[60];
     public IReadOnlyList<AddressCard?> Cards => _cards;
     public List<Mail> Mails { get; } = new();
@@ -984,7 +1016,11 @@ public sealed class NetworkSession : IGameSession
         if (f.Length < 2 || !int.TryParse(f[0], out var ci)) return;
         var p = f[1].Split('|');
         var m = new Mail(ci, ci is >= 0 and < 60 ? _cards[ci]?.Name ?? "" : "", Unesc(p[0]), p.Length > 1 ? Unesc(p[1]) : "", true);
+        if (p.Length >= 6 && int.TryParse(p[2], out var pimg) && pimg > 0)
+            m = m with { PetImage = pimg, PetLevel = int.TryParse(p[3], out var plv) ? plv : 0, PetName = Unesc(p[4]), ItemImage = int.TryParse(p[5], out var iimg) ? iimg : -1 };
         Mails.Add(m); UnreadMail++;
+        // 官方客户端自己在聊天栏提示（exe 字符串 "收到由%s送来的邮件！" / "收到由%s送来的宠物邮件！"）
+        ChatReceived?.Invoke(m.IsPet ? $"收到由{m.Name}送来的宠物邮件！" : $"收到由{m.Name}送来的邮件！", 4);
         MailReceived?.Invoke(m);
     }
 
@@ -1060,7 +1096,9 @@ public sealed class NetworkSession : IGameSession
     /// → IPy c（鉴定中，修理 d）→ 约 12 秒后 sM 栏 招式 格(62 进制) 空 → rU（鉴定后名字、说明变了）+ cNE + JgO 1/0 2 经验|0|0|0|0|0|0 → IPy 5。
     /// 没受损的东西去修："Zd 此道具并未受损。" + JgO 0。
     /// </summary>
-    public void UseOnItem(int skillSlot, int tech, int bagSlot) => Send("sM", skillSlot.ToString(), tech.ToString(), B62(bagSlot), "");
+    /// <summary>刻印（220）：選擇物品里双击道具、按「刻印」→ 刻印窗口（23355）打字、再按「刻印」→ 马上发 sM 栏 招式 格 文字（不发 IPy、不等；官方实测 "sM 9 0 k haoabc"）
+    /// → rU（第 14 段 = 刻的字）+ aPc + JgO 1 2 经验|… → 客户端 IPy 5；结果窗口"铜剑 的刻印成功了。"。</summary>
+    public void UseOnItem(int skillSlot, int tech, int bagSlot, string text = "") => Send("sM", skillSlot.ToString(), tech.ToString(), B62(bagSlot), text.Replace("\\", "\\\\").Replace(" ", "\\S"));
     /// <summary>
     /// 急救（技能种类 3）：点招式 → iET 栏 → 服务端 ysVc（空）→ 客户端"请选择对象"（队伍成员）→ McVa 序号 → 服务端 ND 对象表
     /// → "请选择使用对象" → sM 栏 招式 对象（0 人，宠物 = 栏位+1）空，马上就有结果：对方 aPc + "Zd 接受bob的急救，回复了30点的生命力。"，自己 JgO 1 3 经验|…|回复量。
@@ -1271,6 +1309,40 @@ public sealed class NetworkSession : IGameSession
         Mails.Add(new Mail(cardIndex, _cards[cardIndex]!.Name, DateTime.Now.ToString("yyyy/MM/dd HH:mm"), text, false));
     }
 
+    /// <summary>
+    /// 宠物邮件（PMSG = rMsv，官方实测 "rMsv 0 0 8 item\Stest 0 "）：名片序号 宠物栏 道具格(8–27，-1 不带) 内容 0。
+    /// 服务端条件（cgmsv 0x1400d10e0 反汇编 + 实测）：宠物要有「宠物邮件」技能（招式编号 8900–8903），状态不能是散步(3)，对方要在线；
+    /// 不满足时什么都不回。成功：宠物栏清空（IsSy 栏 0）、"Zd 把宠物邮件送给了X。"、身边的人收 lDuJ 出发效果；
+    /// 过一阵（实测 10 秒–2 分钟）对方收 lDuJ 到达 + Mhbt，宠物停在对方身边约 16 秒（之后 uSB）。
+    /// </summary>
+    public void SendPetMail(int cardIndex, int petSlot, int itemSlot, string text)
+    {
+        if (cardIndex < 0 || cardIndex >= 60 || _cards[cardIndex] == null || text.Length == 0) return;
+        Send("rMsv", cardIndex.ToString(), petSlot.ToString(), itemSlot.ToString(), text.Replace("\\", "\\\\").Replace(" ", "\\S"), "0");
+        var pet = Player.Pets.FirstOrDefault(p => p.Slot == petSlot);
+        Mails.Add(new Mail(cardIndex, _cards[cardIndex]!.Name, DateTime.Now.ToString("yyyy/MM/dd HH:mm"), text, false) { PetImage = pet?.Anime ?? 1, PetLevel = pet?.Level ?? 0, PetName = pet?.DisplayName ?? "" });
+    }
+
+    /// <summary>宠物有没有「宠物邮件」技能（官方 exe 0x4719c4(宠物, 89)：招式编号 / 100 = 89）。</summary>
+    public static bool CanPetMail(PetInfo p) => p.Techs.Any(t => t.TechId / 100 == 89);
+
+    /// <summary>宠物邮件效果：图像 坐标 方向 到达? 效果种类(0–3，宠物的 PetMailEffect) 对象号。</summary>
+    public sealed record PetMailFx(int Image, int X, int Y, int Dir, bool Arrive, int Kind, string ObjId);
+    public event Action<PetMailFx>? PetMailEffect;
+
+    /// <summary>
+    /// lDuJ（PME）"对象号 图像 x y 方向 到达 种类 对象串"，前 7 段 62 进制（实测出发 "7Ef qkW 3U 1B 0 0 2 3|7Ef|3|3|4|101242|1|0|迷你蝙蝠|…"，
+    /// 到达 "… 0 1 2 3|7Ef|241|99|4|…"）。官方 exe 0x4552be：到达时按对象串建一个地上宠物对象（类型 3），效果放完才显示；出发只放效果。
+    /// </summary>
+    private void OnPetMailEffect(string[] f)
+    {
+        if (f.Length < 7) return;
+        int N(int i) => D62Safe(f[i]);
+        bool arrive = N(5) != 0;
+        PetMailEffect?.Invoke(new PetMailFx(N(1), N(2), N(3), N(4), arrive, N(6), f[0]));   // 先放效果（客户端先把这只藏起来）再建对象
+        if (arrive && f.Length >= 8) OnObject(string.Join(' ', f.Skip(7)).Trim());
+    }
+
     // ———————————————————— 交易 ————————————————————
     // 实测（官方客户端 bob 发起，工具 hao 配合），双方都要开着「易」（FS 位 32）：
     //   面向对方点右上「交易」→ TRPL "ixH" → 服务端回 "Cxo 名字|…"（没人："Zd 没有可交易的对象！"）
@@ -1446,12 +1518,13 @@ public sealed class NetworkSession : IGameSession
         if (i + 12 >= p.Length || !int.TryParse(p[i], out var slot)) return null;
         if (p[i + 1].Length == 0 || !int.TryParse(p[i + 4], out var gfx) || !int.TryParse(p[i + 10], out var itemId)) return null;
         int count = int.TryParse(p[i + 12], out var c) && c > 0 ? c : 1;
-        return new ItemStack { ItemId = itemId, Count = count, Slot = slot, Name = Unesc(p[i + 1]), Desc = p[i + 3], Graphic = gfx, Use = int.TryParse(p[i + 6], out var u) ? u : 0, Level = int.TryParse(p[i + 8], out var lv) ? lv : 0 };
+        return new ItemStack { ItemId = itemId, Count = count, Slot = slot, Name = Unesc(p[i + 1]), Desc = p[i + 3], Graphic = gfx, Use = int.TryParse(p[i + 6], out var u) ? u : 0, Level = int.TryParse(p[i + 8], out var lv) ? lv : 0, Flags = int.TryParse(p[i + 9], out var fl) ? fl : 0, Stackable = c > 0, Engraved = i + 13 < p.Length ? Unesc(p[i + 13]) : "" };
     }
 
     private void OnItems(string s)
     {
         var p = s.Split('|');
+        if (_bagRequested != BagPage && p.Length > 14 * 19 && p[0] == "8" && p[14 * 19] == "27") { BagPage = _bagRequested; BagPageChanged?.Invoke(); }
         for (int i = 0; i + 12 < p.Length; i += 14)
         {
             if (!int.TryParse(p[i], out var slot)) continue;
@@ -1655,6 +1728,8 @@ public sealed class NetworkSession : IGameSession
     public bool HasBattlePet { get; private set; }
     /// <summary>服务端正在等第几个指令（0 = 指令1，1 = 指令2）；-1 = 没在等。</summary>
     public int CommandSlot { get; private set; } = -1;
+    /// <summary>EN 第 1 段 = 战斗种类（普通遇敌 1；官方自动战斗"战斗为 BOSS 战时停止"看的是 4–6，exe 0x407dd3）。</summary>
+    public int BattleType { get; private set; }
     /// <summary>服务端时间 − 本机时间（秒），游戏内昼夜用。</summary>
     public long ServerTimeOffset { get; private set; }
     /// <summary>自己角色的形象编号（服务端 C 包里自己那一条的第 6 段，例如 106002）；0 = 还不知道。</summary>
@@ -1696,10 +1771,33 @@ public sealed class NetworkSession : IGameSession
         if (_awaiting) SendCommand(command); else _pending = command;
     }
 
+    // ———— 战斗录像（这个私服客户端加的「本局錄像」：官方把这一场的战斗封包存成 video\video_年月日_序号.dat，系统 → 战斗录像 里播放） ————
+    /// <summary>一场录像：开始时间、地图名、录制者、每行（离开始的毫秒数, 封包明文）。</summary>
+    public sealed record BattleRecording(DateTime Time, string MapName, string Recorder, List<(int Ms, string Line)> Lines);
+    /// <summary>这一场要不要存（战斗里「本局錄像」按钮；每场开始时清掉）。</summary>
+    public bool RecordThisBattle { get; set; }
+    public event Action<BattleRecording>? BattleRecorded;
+    private BattleRecording? _rec;
+    private System.Diagnostics.Stopwatch _recClock = new();
+    private static readonly HashSet<string> RecHeads = new() { "dAgg", "LYIm", "Gn" };
+    private void RecordLine(string line)
+    {
+        int sp = line.IndexOf(' ');
+        string head = sp < 0 ? line : line[..sp];
+        if (head == "dAgg" && !line.StartsWith("dAgg 0"))
+        {
+            _rec = new BattleRecording(DateTime.Now, CurrentMap?.Name ?? "", Player.Name, new()); _recClock.Restart();
+            RecordThisBattle = false;
+        }
+        if (_rec != null && RecHeads.Contains(head)) _rec.Lines.Add(((int)_recClock.ElapsedMilliseconds, line));
+    }
+
     private void EndBattle(BattleOutcome o)
     {
         if (!InBattle) return;
         InBattle = false; _pending = null; _lastCommand = null;
+        if (_rec != null && RecordThisBattle) BattleRecorded?.Invoke(_rec);
+        _rec = null;
         BattleEnded?.Invoke(o);
         Send("eL", "0");   // EO：官方回到地图后发（exe 0x45aba8，等待标志 0x18706d4 清掉时）；cgmsv 回自己的 nsY
     }
@@ -1729,10 +1827,14 @@ public sealed class NetworkSession : IGameSession
     }
 
     /// <summary>登出（CharLogout = WA）：通知服务端后断开。</summary>
+    /// <summary>系统 → 登出 → 回到城内登入点（CharLoginGate = lO，官方实测；服务端把人送回登录点、"注销回到登陆点。"）。</summary>
+    public void ReturnToLoginPoint() => Send("lO");
     public void Logout() { SaveMapCache(); if (InGame) Send("WA"); InGame = false; _closed = true; try { _stream?.Close(); } catch { } }   // 主动登出：标记关闭，不触发断线重连
 
     /// <summary>说话（聊天框）。空格按协议转义成 \S。</summary>
-    public void Say(string text) => Send("uSr", B62(X), B62(Y), "P|" + text.Replace(" ", "\\S"), "5", "5", "1");   // 官方实测 "uSr x y P|hello123 5 5 1"：颜色 5（绿，聊天设定默认）
+    /// <summary>说话颜色 / 范围（系统 → 聊天设定；官方实测改成红、范围 3 后发 "uSr x y P|hi 6 3 1"）。</summary>
+    public int ChatColor = 5, ChatRange = 5;
+    public void Say(string text) => Send("uSr", B62(X), B62(Y), "P|" + text.Replace(" ", "\\S"), ChatColor.ToString(), ChatRange.ToString(), "1");   // 官方实测 "uSr x y P|hello123 5 5 1"：颜色 5（绿，聊天设定默认）、范围 5
 
     public IReadOnlyList<Npc> NpcsOnCurrentMap() => _objects.Values.ToList();
     /// <summary>

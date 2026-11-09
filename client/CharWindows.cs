@@ -239,6 +239,9 @@ public partial class ItemPanel : CgWindow
     public Action<int>? Use;
     public Action<int, int>? Move;
     public Action? Wallet, SortBag;
+    /// <summary>左边「背包1–4」（私服客户端加的，联网才有）：当前页、点了换页。</summary>
+    public Func<int>? BagPage;
+    public Action<int>? SwitchBag;
     /// <summary>手上拿着道具时点地图 = 扔掉（官方 DI）：由 Main 调这个取走手上的格子。</summary>
     public int TakeHeld() { int h = _held; Drop(); return h; }
     private int _held = -1;            // 拿在手上的格子
@@ -274,6 +277,7 @@ public partial class ItemPanel : CgWindow
         Img(22540, 0, 0, block: true);
         Btn(22509, 22510, 246, 6, () => { Drop(); Visible = false; });
         Txt(p.Gold.ToString(), 259, 76, right: true);
+        if (BagPage != null) for (int k = 0; k < 4; k++) BagTab(k, BagPage() == k);
         Btn(22545, 22546, 194, 93, () => { Drop(); Wallet?.Invoke(); });   // 钱包 → 金幣窗口（扔钱）
         if (SortBag != null)   // 「整理」：这个私服客户端加的按钮（官方 4.06 没有），发 CUSTOMXB 0
         {
@@ -293,6 +297,33 @@ public partial class ItemPanel : CgWindow
         for (int i = 0; i < 20; i++) Cell(8 + i, BagPos(i), bySlot.GetValueOrDefault(8 + i));
 
     }
+
+    /// <summary>
+    /// 背包页签（官方截图量的，窗口外左边）：第 k 个左上 (−64, 215+52k)。米色卡片（exe RCDATA 152，48×48）+ 背包图 99455 在 (5,4)
+    /// + 页码小牌 (20,14) 22×18（当前页深色 754c4c / 其它 a66c6c）+ 右边竖排"背包N"条 (48,0) 15×46（底 ede4c6、字 62450e）。
+    /// </summary>
+    private void BagTab(int k, bool on)
+    {
+        float x = -64, y = 215 + 52 * k;
+        var root = new Control { Position = new Vector2(x, y), Size = new Vector2(63, 48), MouseFilter = Control.MouseFilterEnum.Stop };
+        Body.AddChild(root);
+        if (ExeArt.Png(152) is { } card) root.AddChild(new TextureRect { Texture = card, MouseFilter = Control.MouseFilterEnum.Ignore });
+        else root.AddChild(new ColorRect { Size = new Vector2(48, 48), Color = new Color("fdf7e7"), MouseFilter = Control.MouseFilterEnum.Ignore });
+        if (Cache.ImageNo(99455).Tex is { } bag) root.AddChild(new TextureRect { Texture = bag, Position = new Vector2(5, 4), MouseFilter = Control.MouseFilterEnum.Ignore });
+        root.AddChild(new ColorRect { Position = new Vector2(20, 14), Size = new Vector2(22, 18), Color = new Color(on ? "573535" : "915858"), MouseFilter = Control.MouseFilterEnum.Ignore });
+        root.AddChild(new ColorRect { Position = new Vector2(21, 15), Size = new Vector2(20, 16), Color = new Color(on ? "754c4c" : "a66c6c"), MouseFilter = Control.MouseFilterEnum.Ignore });
+        var num = new Label { Text = (k + 1).ToString(), Position = new Vector2(20, 14), Size = new Vector2(22, 18), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, MouseFilter = Control.MouseFilterEnum.Ignore };
+        num.AddThemeFontSizeOverride("font_size", 15); num.AddThemeColorOverride("font_color", on ? new Color("b3b3b3") : Colors.White);
+        num.AddThemeConstantOverride("outline_size", 1); num.AddThemeColorOverride("font_outline_color", on ? new Color("b3b3b3") : Colors.White);
+        root.AddChild(num);
+        root.AddChild(new ColorRect { Position = new Vector2(48, 0), Size = new Vector2(15, 46), Color = new Color("ede4c6"), MouseFilter = Control.MouseFilterEnum.Ignore });
+        root.AddChild(new ColorRect { Position = new Vector2(48, 0), Size = new Vector2(15, 1), Color = new Color("69551d"), MouseFilter = Control.MouseFilterEnum.Ignore });
+        root.AddChild(new ColorRect { Position = new Vector2(62, 0), Size = new Vector2(1, 46), Color = new Color("c7b78e"), MouseFilter = Control.MouseFilterEnum.Ignore });
+        string[] col = { "背", "包", (k + 1).ToString() };
+        for (int i = 0; i < 3; i++) root.AddChild(new CgText { Text = col[i], FontColor = new Color("62450e"), Position = new Vector2(i == 2 ? 52 : 49, 2 + 13 * i), Wrap = 2 });
+        root.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) { Drop(); SwitchBag?.Invoke(k); } };
+    }
+    public void TestBagTab(int k) => SwitchBag?.Invoke(k);
 
     private void Cell(int slot, Vector2 c, ItemStack? it)
     {
@@ -401,7 +432,7 @@ public partial class ItemPanel : CgWindow
 
 /// <summary>
 /// 系统窗口（底部菜单"系统"，官方实测）：背景 22500 在 (1,1)，关闭 (167,7)；7 项字顶 64+27i，左 47。
-/// 登出 = 发 CharLogout 回设置界面；聊天设定 = 聊天栏显示行数 2→4→6；其余还没做。
+/// 登出 = 发 CharLogout 回设置界面；聊天设定 22960（行数 / 文字颜色 / 常用句 / 聊天范围，官方 exe 0x448a00）。
 /// </summary>
 public partial class SystemPanel : CgWindow
 {
@@ -411,6 +442,10 @@ public partial class SystemPanel : CgWindow
     public int Page { get; private set; } = -1;
     public GameConfig Cfg = null!;
     public Action? DrawChanged;   // 绘图设定改了（主程序重画周围对象）
+    public Action? ChatChanged;   // 聊天设定改了（行数 / 颜色 / 范围）
+    public Action? LoginPoint, Logout;   // 登出页的两项
+    public Action? AdvChanged;           // 高级设定改了
+    public Action? OpenPhrases;   // 常用句 <设定> → 我的口頭禪
     public Action<string>? Toast;
 
     public override void _Ready()
@@ -430,6 +465,49 @@ public partial class SystemPanel : CgWindow
         var yellow = new Color(1, 1, 0);
         switch (Page)
         {
+            case 0:   // 登出（官方实测）：22504，「回到城内登入点」(lO) /「服务器选择界面」（登出回设置界面）
+                Img(22504, 0, 0, block: true);
+                Txt("回到城内登入点", 36, 64);
+                Hit(17, 59, 155, 19, _ => { Visible = false; LoginPoint?.Invoke(); });
+                Txt("服务器选择界面", 36, 103);
+                Hit(17, 98, 155, 19, _ => { Visible = false; Logout?.Invoke(); });
+                break;
+            case 7:   // 高级设定（官方实测：22500 底，5 项，每项标题 + "现在 值 <变更>"，行距 21.5）
+            {
+                Img(22500, 0, 0, block: true);
+                Btn(22509, 22510, 167, 7, () => Visible = false);
+                void Row(int i, string label, string value, Action? change)
+                {
+                    float y = 48 + 43 * i;
+                    Txt(label, 16, y, yellow);
+                    Txt("现在", 16, y + 22); Txt(value, 60, y + 22);
+                    if (change != null) { Txt("<变更>", 126, y + 22); Hit(124, y + 18, 50, 18, _ => { GameAudio.Se(51); change(); Refresh(); }); }
+                }
+                Row(0, "后台窗口跳帧", Cfg.BgSkip ? "开启" : "关闭", () => { Cfg.BgSkip = !Cfg.BgSkip; GameConfig.Patch(("bg_skip", Cfg.BgSkip ? 1 : 0)); AdvChanged?.Invoke(); });
+                Row(1, "窗口模式", Cfg.Windowed ? "开启" : "关闭", OS.GetName() == "Android" ? null : () => { Cfg.Windowed = !Cfg.Windowed; GameConfig.Patch(("windowed", Cfg.Windowed ? 1 : 0)); AdvChanged?.Invoke(); });
+                Row(2, "分辨率", "960*720", null);
+                Row(3, "刷新率", $"{(int)Engine.GetFramesPerSecond()} FPS", null);
+                Row(4, "扫描线同步", Cfg.VSync ? "开启" : "关闭", () => { Cfg.VSync = !Cfg.VSync; GameConfig.Patch(("vsync", Cfg.VSync ? 1 : 0)); AdvChanged?.Invoke(); });
+                Txt("回上一页", 64, 264);
+                Hit(44, 259, 104, 19, _ => { Page = -1; Refresh(); });
+                return;
+            }
+            case 1:   // 聊天（官方实测坐标）：↑↓ 到头响错误音
+                Img(22960, 0, 0, block: true);
+                Txt("设定显示行数", 15, 48, yellow);
+                Txt("目前", 15, 72); Txt(Cfg.ChatLines.ToString(), 60, 72); Txt("行", 80, 72);
+                Txt("↑", 130, 72); Hit(125, 68, 18, 18, _ => ChatSet("chat_lines", ref Cfg.ChatLines, 1, 0, 20));
+                Txt("↓", 155, 72); Hit(150, 68, 18, 18, _ => ChatSet("chat_lines", ref Cfg.ChatLines, -1, 0, 20));
+                Txt("文字颜色设定", 15, 96, yellow);
+                Txt("目前颜色", 15, 120, ChatLog.Palette[Math.Clamp(Cfg.ChatColor, 0, 9)]);
+                Txt("<变更>", 120, 120); Hit(118, 116, 52, 18, _ => { Cfg.ChatColor = (Cfg.ChatColor + 1) % 10; if (Cfg.ChatColor == 4) Cfg.ChatColor = 5; GameAudio.Se(51); Saved(); });
+                Txt("常用句设定", 15, 145, yellow);
+                Txt("<设定>", 120, 168); Hit(118, 164, 52, 18, _ => { GameAudio.Se(51); OpenPhrases?.Invoke(); });
+                Txt("聊天范围设定", 15, 192, yellow);
+                Txt("现在", 15, 216); Txt(Cfg.ChatRange.ToString(), 60, 216);
+                Txt("↑", 130, 216); Hit(125, 212, 18, 18, _ => ChatSet("chat_range", ref Cfg.ChatRange, 1, 1, 5));
+                Txt("↓", 155, 216); Hit(150, 212, 18, 18, _ => ChatSet("chat_range", ref Cfg.ChatRange, -1, 1, 5));
+                break;
             case 2:   // 音樂：背景音乐 / 音效 0–15（官方默认 8），↑↓ 调
                 Img(22961, 0, 0, block: true);
                 Txt("背景音乐音量", 14, 48, yellow);
@@ -452,10 +530,10 @@ public partial class SystemPanel : CgWindow
                 break;
             case 5:   // 繪圖設定
                 Img(22965, 0, 0, block: true);
-                Option(0, "隐藏画面角色", Cfg.HidePlayers ? "隐藏" : "不隐藏", () => { Cfg.HidePlayers = !Cfg.HidePlayers; GameConfig.Patch(("hide_players", Cfg.HidePlayers ? 1 : 0)); DrawChanged?.Invoke(); });
+                Option(0, "隐藏画面角色", HideNames[Cfg.HideChars & 3], () => { Cfg.HideChars = (Cfg.HideChars + 1) % 4; GameConfig.Patch(("hide_chars", Cfg.HideChars)); DrawChanged?.Invoke(); });
                 Option(1, "显示NPC名字", Cfg.ShowNpcNames ? "开启" : "关闭", () => { Cfg.ShowNpcNames = !Cfg.ShowNpcNames; GameConfig.Patch(("npc_names", Cfg.ShowNpcNames ? 1 : 0)); DrawChanged?.Invoke(); });
-                Option(2, "战斗背景修正", "开启", () => Toast?.Invoke("这项还没做"));
-                Option(3, "过场动画样式", "默认", () => Toast?.Invoke("这项还没做"));
+                Option(2, "战斗背景修正", Cfg.BattleBgFix ? "开启" : "关闭", () => { Cfg.BattleBgFix = !Cfg.BattleBgFix; GameConfig.Patch(("battle_bg_fix", Cfg.BattleBgFix ? 1 : 0)); });
+                Option(3, "过场动画样式", Cfg.TransStyle == 1 ? "仿石器" : "默认", () => { Cfg.TransStyle ^= 1; GameConfig.Patch(("trans_style", Cfg.TransStyle)); });
                 break;
             default:
                 Page = -1;
@@ -490,6 +568,22 @@ public partial class SystemPanel : CgWindow
         Txt("↑", 129, y); Hit(124, y - 4, 18, 18, _ => Change(1));
         Txt("↓", 153, y); Hit(148, y - 4, 18, 18, _ => Change(-1));
     }
+
+    /// <summary>官方 exe 0x49a610 的四个说法。</summary>
+    public static readonly string[] HideNames = { "不隐藏", "隐藏宠物", "隐藏玩家", "隐藏两者" };
+
+    private void ChatSet(string key, ref int v, int d, int min, int max)
+    {
+        int n = v + d;
+        if (n < min || n > max) { GameAudio.Se(55); return; }
+        v = n; GameAudio.Se(51); Saved();
+    }
+    private void Saved()
+    {
+        GameConfig.Patch(("chat_lines", Cfg.ChatLines), ("chat_color", Cfg.ChatColor), ("chat_range", Cfg.ChatRange));
+        ChatChanged?.Invoke(); Refresh();
+    }
+    public void TestChat(string what) { switch (what) { case "lines+": ChatSet("", ref Cfg.ChatLines, 1, 0, 20); break; case "color": Cfg.ChatColor = (Cfg.ChatColor + 1) % 10; if (Cfg.ChatColor == 4) Cfg.ChatColor = 5; Saved(); break; case "range-": ChatSet("", ref Cfg.ChatRange, -1, 1, 5); break; } }
 
     private void Option(int i, string label, string value, Action change)
     {

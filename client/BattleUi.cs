@@ -102,6 +102,7 @@ public partial class BattleUi : CanvasLayer
         foreach (var c in _stage.GetChildren()) c.QueueFree();
         _gen++; _units.Clear(); _queue.Clear(); _lines.Clear(); _running = false;
         PlayedEvents = 0; AttackAnimsShown = 0; _turnStart = -1; _picking = false; _slot = 0; _hasPet = BattlePet?.Invoke() != null;
+        Recording = false; if (_recBtn != null && ExeArt.Bmp(175) is { } rb) _recBtn.TextureNormal = _recBtn.TextureHover = rb;
         _playerId = v.PlayerUnitId;
         // 站位：官方 20 个位置的屏幕坐标（640×480 画面，来自 CGAssistant 的位置表），居中放到当前画面上。
         // 联网模式单位 Id 就是位置号（0–9 我方、10–19 敌方）；单机模式按顺序映射。
@@ -200,7 +201,57 @@ public partial class BattleUi : CanvasLayer
         _d1 = new TextureRect { MouseFilter = Control.MouseFilterEnum.Ignore }; _d2 = new TextureRect { MouseFilter = Control.MouseFilterEnum.Ignore };
         _root.AddChild(_d1); _root.AddChild(_d2);
         _status.Visible = false; _log.Visible = false;
+        BuildExtraBar(P);
         return true;
+    }
+
+    // ———— 指令面板下面的一条（这个私服客户端加的）：「本局錄像」BMP 175/176、「自動」173/174、「選項」252/253（exe 资源，官方截图量的位置） ————
+    /// <summary>录像回放用：不显示指令面板和倒计时。</summary>
+    public bool ReadOnly;
+    /// <summary>这一场要存录像（点「本局錄像」切换；官方：点了变灰，打完存 video\video_年月日_序号.dat）。</summary>
+    public bool Recording { get; private set; }
+    public Action<bool>? RecordToggled;
+    /// <summary>自动战斗开关、「選項」按钮。</summary>
+    public bool AutoOn { get; private set; }
+    public Action<bool>? AutoToggled;
+    public Action? OptionsPressed;
+    private TextureButton? _recBtn, _autoBtn;
+    private void BuildExtraBar(Func<int, int, Vector2> P)
+    {
+        var bar = new Panel { Position = P(767, 76), Size = new Vector2(189, 24), MouseFilter = Control.MouseFilterEnum.Ignore };
+        bar.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color(0.08f, 0.08f, 0.1f, 0.9f), CornerRadiusTopLeft = 10, CornerRadiusBottomLeft = 10, CornerRadiusTopRight = 10, CornerRadiusBottomRight = 10, BorderColor = new Color(0.55f, 0.55f, 0.55f), BorderWidthLeft = 1, BorderWidthRight = 1, BorderWidthTop = 1, BorderWidthBottom = 1 });
+        _panel!.AddChild(bar);
+        _recBtn = ExeBtn(175, P(780, 79), () => SetRecording(!Recording));
+        _autoBtn = ExeBtn(174, P(861, 79), () => SetAuto(!AutoOn));
+        ExeBtn(252, P(906, 79), () => OptionsPressed?.Invoke(), 253);
+    }
+    private TextureButton? ExeBtn(int id, Vector2 pos, Action a, int hover = -1)
+    {
+        if (ExeArt.Bmp(id) is not { } t) return null;
+        var b = new TextureButton { TextureNormal = t, TextureHover = hover > 0 ? ExeArt.Bmp(hover) ?? t : t, Position = pos };
+        b.Pressed += () => { GameAudio.Se(51); a(); };
+        _panel!.AddChild(b); return b;
+    }
+    public void SetRecording(bool on)
+    {
+        Recording = on;
+        if (_recBtn != null && ExeArt.Bmp(on ? 176 : 175) is { } t) _recBtn.TextureNormal = _recBtn.TextureHover = t;
+        RecordToggled?.Invoke(on);
+    }
+    /// <summary>自动战斗替玩家下指令：走和手动一样的信号，面板照常往下一个指令位走。</summary>
+    public void AutoAct(Command c)
+    {
+        if (c.Kind is CommandKind.Skill or CommandKind.PetSkill) EmitSignal(SignalName.CommandSkill, (int)c.Kind, c.TargetId, c.Arg, c.Level);
+        else if (c.Kind == CommandKind.Item) EmitSignal(SignalName.CommandArg, (int)c.Kind, c.TargetId, c.Arg);
+        else if (c.TargetId >= 0) EmitSignal(SignalName.CommandTarget, (int)c.Kind, c.TargetId);
+        else EmitSignal(SignalName.CommandChosen, (int)c.Kind);
+        CloseSub(); AfterCommand();
+    }
+    public void SetAuto(bool on)
+    {
+        AutoOn = on;
+        if (_autoBtn != null && ExeArt.Bmp(on ? 173 : 174) is { } t) _autoBtn.TextureNormal = _autoBtn.TextureHover = t;
+        AutoToggled?.Invoke(on);
     }
 
     private void OnPanelButton(CommandKind? kind)
@@ -244,7 +295,7 @@ public partial class BattleUi : CanvasLayer
             _panelBg.Position = new Vector2((PetPhase ? 685 : 668) - 668, 4);
         }
         foreach (var (b, slot2) in _cmdButtons) { b.Visible = !PetPhase; b.Disabled = _slot >= 1 && !slot2; }
-        if (_panel != null) _panel.Visible = !Busy && Visible && _slot < CommandsPerTurn;
+        if (_panel != null) _panel.Visible = !ReadOnly && !Busy && Visible && _slot < CommandsPerTurn;
         if (_msg != null && !_picking) _msg.Text = "";
         ShowBar(!PetPhase || _picking);
         if (PetPhase && !_picking && _panel != null && _panel.Visible) ShowPetTechs();
@@ -581,7 +632,7 @@ public partial class BattleUi : CanvasLayer
     public override void _Process(double delta)
     {
         if (_panel == null || !Visible) return;
-        bool show = !Busy && _turnStart > 0;
+        bool show = !Busy && _turnStart > 0 && !ReadOnly;
         _d1!.Visible = _d2!.Visible = show;
         if (!show) return;
         int left = Math.Max(0, 99 - (int)(((long)Time.GetTicksMsec() - _turnStart) / 1000));   // 官方本服配置 99 秒（原版 30 秒）

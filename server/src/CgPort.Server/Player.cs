@@ -38,6 +38,13 @@ public sealed class ItemStack
     public int Use { get; set; }
     /// <summary>联网：rU 第 8 段（图像后第 4 段）= 道具等级（水龙装备 7、铜剑 1；没鉴定的也有）。</summary>
     public int Level { get; set; }
+    /// <summary>联网：rU 第 10 段（图像后第 5 段）标志位。第 1 位 = 能用宠物邮件寄送（exe 0x446d57；水晶 184 没有，说明里写着"无法用宠物邮件传送"）。</summary>
+    public int Flags { get; set; }
+    public bool CanPetMail => (Flags & 1) != 0;
+    /// <summary>联网：rU 数量段不是 0（可堆叠）。官方选寄送道具时数量非 0 就画（1 也画）。</summary>
+    public bool Stackable { get; set; }
+    /// <summary>联网：rU 第 14 段 = 刻印的字（刻印技能刻上去的，官方实测 "…|0|0|0|haoabc"）。</summary>
+    public string Engraved { get; set; } = "";
     /// <summary>联网模式：服务端的格子号（8 起是背包，0–7 是装备栏）。单机模式不用，为 -1。</summary>
     public int Slot { get; set; } = -1;
 }

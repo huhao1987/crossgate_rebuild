@@ -41,7 +41,20 @@ public sealed class GameConfig
     /// <summary>音乐、音效音量 0–100（bgm_volume / se_volume，默认 80）。</summary>
     public int BgmVolume = 80, SeVolume = 80;
     /// <summary>系统 → 绘图设定（官方 4.06）：隐藏画面角色（别的玩家不画）、显示 NPC 名字。</summary>
-    public bool HidePlayers, ShowNpcNames = true;
+    /// <summary>绘图设定 → 隐藏画面角色（官方 4 档：0 不隐藏 1 隐藏宠物 2 隐藏玩家 3 隐藏两者；exe 0x4094b6 第 1 位宠物、第 2 位玩家）。</summary>
+    public int HideChars;
+    public bool HidePlayers => (HideChars & 2) != 0;
+    public bool HidePets => (HideChars & 1) != 0;
+    public bool ShowNpcNames = true;
+    /// <summary>绘图设定 → 战斗背景修正（关闭/开启，官方默认开启）、过场动画样式（0 默认 / 1 仿石器）。</summary>
+    public bool BattleBgFix = true;
+    public int TransStyle;
+    /// <summary>聊天设定（官方 exe 0x448a00）：显示行数 0–20（默认 2）、文字颜色 0–9 跳过 4（默认 5 绿）、聊天范围 1–5（默认 5）。颜色和范围随说话包发出（uSr … 颜色 范围 1）。</summary>
+    public int ChatLines = 2, ChatColor = 5, ChatRange = 5;
+    /// <summary>高级设定（官方 PC 版的显示选项）：后台窗口跳帧（切到后台降帧）、窗口模式（关 = 全屏）、扫描线同步（垂直同步）。</summary>
+    public bool BgSkip, Windowed = true, VSync;
+    /// <summary>自动战斗选项位（见 AutoBattle，默认 0x42 = 智能选择 + BOSS 战停止）。</summary>
+    public int AutoOpts = AutoBattle.Default;
     /// <summary>大地图「显示选项」7 类（官方默认：地点、村镇、NPC 打勾），位 0–6 = 标注类别 0–6。</summary>
     public int MapLabelMask = 0b1010001;
     /// <summary>联网：登录后显示选角色界面（char_select，默认开；自动测试关掉 = 自动进第一个角色）。</summary>
@@ -168,7 +181,7 @@ public sealed class GameConfig
             Encounters = o["encounters"]?.GetValue<bool>() ?? true,
             Zoom = (float)(o["zoom"]?.GetValue<double>() ?? 1.0),
             LoadSave = o["load_save"]?.GetValue<bool>() ?? true,
-            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), HidePlayers = Int(o, "hide_players", 0) != 0, CharSelect = Int(o, "char_select", 1) != 0, ShowNpcNames = Int(o, "npc_names", 1) != 0, MapLabelMask = Int(o, "map_labels", 0b1010001), UiMode = Str(o, "ui_mode", ""),
+            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), HideChars = Int(o, "hide_chars", Int(o, "hide_players", 0) != 0 ? 2 : 0), BattleBgFix = Int(o, "battle_bg_fix", 1) != 0, TransStyle = Int(o, "trans_style", 0), ChatLines = Int(o, "chat_lines", 2), ChatColor = Int(o, "chat_color", 5), ChatRange = Int(o, "chat_range", 5), BgSkip = Int(o, "bg_skip", 0) != 0, AutoOpts = Int(o, "auto_opts", AutoBattle.Default), Windowed = Int(o, "windowed", 1) != 0, VSync = Int(o, "vsync", 0) != 0, CharSelect = Int(o, "char_select", 1) != 0, ShowNpcNames = Int(o, "npc_names", 1) != 0, MapLabelMask = Int(o, "map_labels", 0b1010001), UiMode = Str(o, "ui_mode", ""),
             Account = Str(o, "account", ""), Password = Str(o, "password", ""), CdKey = Str(o, "cdkey", ""),
         };
         if (o["start"] is JsonArray st && st.Count == 2) { c.StartX = st[0]!.GetValue<int>(); c.StartY = st[1]!.GetValue<int>(); }

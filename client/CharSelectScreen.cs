@@ -27,8 +27,22 @@ public partial class CharSelectScreen : CanvasLayer
     private LineEdit? _name;
     public string Hint { get; private set; } = "";
 
-    public static readonly int[] Anime = { 105002, 105027, 105052, 105077, 105102, 105127, 105152, 105252, 105277, 105302, 105327, 105352, 105377, 105402 };
-    public static readonly int[] FaceBase = { 202800, 202900, 203000, 203100, 203200, 203300, 203400, 203500, 203600, 203700, 203800, 203900, 204000, 204100 };
+    /// <summary>两套形象（exe 0x483200 的表，每条 6 个数：动画、?、?、头像、小头像、?）：右上「Change」（这个私服客户端加的）在两套之间切换（官方实测）。
+    /// 第 2 套 = 106002 起（hao / bob 就是这一套），头像 200000 起；颜色、眼睛、嘴巴规则同第 1 套（实测创建 "aSEl 1 settwo 106002 200010 …"：眼睛 +2 = 头像 +10）。</summary>
+    public static readonly int[][] AnimeSets =
+    {
+        new[] { 105002, 105027, 105052, 105077, 105102, 105127, 105152, 105252, 105277, 105302, 105327, 105352, 105377, 105402 },
+        new[] { 106002, 106027, 106052, 106077, 106102, 106127, 106152, 106252, 106277, 106302, 106327, 106352, 106377, 106402 },
+    };
+    public static readonly int[][] FaceSets =
+    {
+        new[] { 202800, 202900, 203000, 203100, 203200, 203300, 203400, 203500, 203600, 203700, 203800, 203900, 204000, 204100 },
+        new[] { 200000, 200200, 200800, 201000, 201200, 201400, 201600, 200400, 200600, 201800, 202000, 202200, 202400, 202600 },
+    };
+    private int _set;
+    public int Set => _set;
+    private int[] Anime => AnimeSets[_set];
+    private int[] FaceBase => FaceSets[_set];
     private static readonly Color Ink = new(0.15f, 0.1f, 0.05f);
 
     public override void _Ready()
@@ -105,7 +119,19 @@ public partial class CharSelectScreen : CanvasLayer
         Hit(187, 101, 30, 24, () => { _color = (_color + 1) % 4; Refresh(); });
         Hit(120, 415, 88, 52, () => { _eye = _mouth = 0; Array.Clear(_stats); Array.Clear(_elem); Hint = ""; Page = 2; Refresh(); });
         Hit(386, 419, 144, 52, () => { Page = 0; Refresh(); });
+        // 右上「Change」：换另一套形象（图档里没找到这张按钮图，照官方的样子画：浅青灰底板 + 深青斜体字）
+        var chg = new Panel { Position = new Vector2(533, 9), Size = new Vector2(94, 28), MouseFilter = Control.MouseFilterEnum.Stop };
+        chg.AddThemeStyleboxOverride("panel", new StyleBoxFlat { BgColor = new Color(0.78f, 0.82f, 0.74f), BorderColor = new Color(0.35f, 0.3f, 0.22f), BorderWidthBottom = 2, BorderWidthRight = 2, BorderWidthLeft = 1, BorderWidthTop = 1, CornerRadiusTopLeft = 2, CornerRadiusTopRight = 2, CornerRadiusBottomLeft = 2, CornerRadiusBottomRight = 2 });
+        var lbl = new Label { Text = "Change", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Size = chg.Size, MouseFilter = Control.MouseFilterEnum.Ignore };
+        lbl.AddThemeFontSizeOverride("font_size", 19); lbl.AddThemeColorOverride("font_color", new Color(0.1f, 0.33f, 0.36f));
+        lbl.AddThemeConstantOverride("outline_size", 3); lbl.AddThemeColorOverride("font_outline_color", new Color(0.95f, 0.85f, 0.55f));
+        chg.AddChild(lbl);
+        chg.GuiInput += e => { if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left }) ToggleSet(); };
+        _root.AddChild(chg);
     }
+
+    /// <summary>「Change」：换一套形象，选中的位置和颜色清零。</summary>
+    public void ToggleSet() { _set ^= 1; _pick = 0; _color = 0; Refresh(); }
 
     // ———— 創造角色 ————
     public int Face => FaceBase[_pick] + 25 * _color + 5 * _eye + _mouth;

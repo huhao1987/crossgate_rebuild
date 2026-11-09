@@ -56,7 +56,9 @@ public partial class NetCharSel : SceneTree
                 cs!.AskDelete(0); cs.TestConfirm(); cs.TestConfirm(); _st = 5; _f = 0; break;
             case 5 when S.CharSlots[0] == null && _f > 30 || _f > 300:
                 Check(S.CharSlots[0] == null, "删除（问两次）→ 列表空了");
-                cs!.TestPick(0, 0); cs.TestCreatePage(1); cs.TestFill("selr", new[] { 10, 5, 5, 5, 5 }, new[] { 5, 5, 0, 0 }, 1, 1);
+                cs!.ToggleSet(); cs.TestPick(0, 0); cs.TestCreatePage(1);   // 「Change」换第 2 套（106002 起）
+                cs.TestFill("selr", new[] { 10, 5, 5, 5, 5 }, new[] { 5, 5, 0, 0 }, 1, 1);
+                Check(cs.Set == 1 && cs.Body == 106002 && cs.Face == 200006, $"Change → 第 2 套：形象 {cs.Body} 头像 {cs.Face}");
                 cs.TryCreate(); cs.TestConfirm(); _st = 6; _f = 0; break;
             case 6 when S.CharSlots[1]?.Name == "selr" || _f > 300:
                 Check(S.CharSlots[1]?.Name == "selr", $"右页再建一个：{S.CharSlots[1]?.Name}");

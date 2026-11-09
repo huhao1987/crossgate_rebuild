@@ -66,11 +66,82 @@ public partial class Main : Node2D
     public AlbumWindow AlbumUi => _album;
     private MailEditWindow _mailEdit = null!;
     private MailRecordWindow _mailRecord = null!;
+    private MailTypeWindow _mailType = null!;
+    private PetMailPetsWindow _petMailPets = null!;
+    private PetMailEditWindow _petMailEdit = null!;
+    private PetMailItemWindow _petMailItems = null!;
+    private int _mailCard = -1;
+    public MailTypeWindow MailTypeUi => _mailType;
+    public PetMailPetsWindow PetMailPetsUi => _petMailPets;
+    public PetMailEditWindow PetMailEditUi => _petMailEdit;
+    public PetMailItemWindow PetMailItemsUi => _petMailItems;
+    private readonly HashSet<string> _fxHidden = new();
+    public int PetMailFxCount { get; private set; }
     private ConfirmBox _confirm = null!;
     public CardBookWindow CardBookUi => _cardBook;
     public MailEditWindow MailEditUi => _mailEdit;
     public MailRecordWindow MailRecordUi => _mailRecord;
     public ConfirmBox ConfirmUi => _confirm;
+    private PhraseWindow _phrases = null!;
+    private AutoBattle _auto = null!;
+    private AutoBattleOptions _autoOpts = null!;
+    public AutoBattle Auto => _auto;
+    public AutoBattleOptions AutoOptsUi => _autoOpts;
+    /// <summary>每帧：开着自动战斗、面板在等指令时替玩家下（Main._Process 调）。</summary>
+    private void AutoBattleTick()
+    {
+        if (!_auto.On || _session is not NetworkSession ns || !ns.InBattle || _battleUi.Busy || !_battleUi.PanelState.Visible || ns.CommandSlot < 0) return;
+        if (_auto.ShouldStop(ns)) { _battleUi.SetAuto(false); return; }
+        if (_auto.Decide(ns, ns.CurrentBattle.Turn, ns.CommandSlot, ns.PetTurn) is { } c) _battleUi.AutoAct(c);
+    }
+    private BattleUi _replayUi = null!;
+    private VideoListWindow _videoList = null!;
+    private VideoPlayer? _replay;
+    private Image? _recThumb;
+    public VideoListWindow VideoListUi => _videoList;
+    public BattleUi ReplayUi => _replayUi;
+    public bool Replaying => _replay != null;
+    /// <summary>播放录像：战斗中不能播；播的时候地图上的自己藏起来，播完恢复。</summary>
+    public void StartReplay(NetworkSession.BattleRecording rec)
+    {
+        if (_session.InBattle || _battleUi.Visible || _replay != null) { _toast.Show("战斗中不能播放录像", 2); return; }
+        _player.Visible = false; _hudSkin.SetBattle(true);
+        _replay = new VideoPlayer { Rec = rec, Ui = _replayUi, Finished = () => { _replay = null; _player.Visible = true; _hudSkin.SetBattle(false); } };
+        AddChild(_replay);
+    }
+    public PhraseWindow PhrasesUi => _phrases;
+    /// <summary>聊天设定生效：显示行数、说话颜色 / 范围。</summary>
+    private void ApplyChatCfg()
+    {
+        if (_chat != null) _chat.MaxLines = Math.Clamp(_cfg.ChatLines, 0, 20);
+        if (_session is NetworkSession n) { n.ChatColor = _cfg.ChatColor; n.ChatRange = _cfg.ChatRange; }
+    }
+
+    /// <summary>高级设定生效：垂直同步、窗口 / 全屏（安卓不管）。后台跳帧在 _Notification 里。</summary>
+    private void ApplyAdvCfg()
+    {
+        DisplayServer.WindowSetVsyncMode(_cfg.VSync ? DisplayServer.VSyncMode.Enabled : DisplayServer.VSyncMode.Disabled);
+        if (OS.GetName() != "Android" && !OS.HasFeature("headless"))
+        {
+            var want = _cfg.Windowed ? DisplayServer.WindowMode.Windowed : DisplayServer.WindowMode.Fullscreen;
+            if (DisplayServer.WindowGetMode() != want && DisplayServer.GetName() != "headless") DisplayServer.WindowSetMode(want);
+        }
+    }
+
+    private void CloseMailWindows() { foreach (var w in new CanvasLayer[] { _mailEdit, _mailRecord, _mailType, _petMailPets, _petMailEdit, _petMailItems }) w.Visible = false; }
+
+    /// <summary>宠物邮件效果（lDuJ）：在 (X,Y) 放效果；到达的那只宠物（地上宠物对象）效果放完才显示。</summary>
+    private void OnPetMailFx(NetworkSession.PetMailFx fx)
+    {
+        if (_view == null) return;
+        int code = fx.Kind * 2 + (fx.Arrive ? 1 : 0);
+        if (fx.Arrive) { _fxHidden.Add(fx.ObjId); SpawnGround(); }
+        var node = new PetMailFxNode { Cache = _cache, Anime = fx.Image, Dir = ((fx.Dir % 8) + 8) % 8, Code = code, StandAct = _cfg.ActStand, Cell = new Vector2(fx.X, fx.Y) };
+        node.Done = () => { if (_fxHidden.Remove(fx.ObjId)) SpawnGround(); };
+        PetMailFxCount++;
+        _view.Entities.AddChild(node);
+    }
+
     private void ClearMail() { if (_session is NetworkSession n) n.UnreadMail = 0; _hudSkin.SetMailLit(false); }
     private TradeWindow _trade = null!;
     public TradePicker TradePickerUi => _tradePicker;
@@ -275,10 +346,28 @@ public partial class Main : Node2D
         _mailEdit = new MailEditWindow { Cache = _cache, Session = () => _session as NetworkSession };
         _mailRecord = new MailRecordWindow { Cache = _cache, Session = () => _session as NetworkSession };
         _confirm = new ConfirmBox { Cache = _cache };
-        AddChild(_cardBook); AddChild(_mailEdit); AddChild(_mailRecord); AddChild(_confirm);
-        _cardBook.WriteMail = i => { _cardBook.Visible = false; _mailEdit.Open(i); };
-        _mailEdit.Back = () => _cardBook.Toggle();
+        _mailType = new MailTypeWindow { Cache = _cache };
+        _petMailPets = new PetMailPetsWindow { Cache = _cache, Session = () => _session as NetworkSession };
+        _petMailEdit = new PetMailEditWindow { Cache = _cache, Session = () => _session as NetworkSession };
+        _petMailItems = new PetMailItemWindow { Cache = _cache, Session = () => _session as NetworkSession };
+        AddChild(_cardBook); AddChild(_mailEdit); AddChild(_mailRecord); AddChild(_mailType); AddChild(_petMailPets); AddChild(_petMailEdit); AddChild(_petMailItems); AddChild(_confirm);
+        // 名片「郵件」→ 選擇郵件（一般 / 寵物）；一般 → 编辑邮件；寵物 → 选宠物 → 编辑宠物邮件 + 选道具（官方实测流程）
+        // 没有会宠物邮件的宠物时直接进编辑邮件（官方实测）
+        _cardBook.WriteMail = i => { _cardBook.Visible = false; _mailCard = i; if (_mailType.HasMailPet()) { _mailType.Visible = true; _mailType.Refresh(); } else _mailEdit.Open(i); };
+        _mailType.HasMailPet = () => _session is NetworkSession nh && nh.Player.Pets.Any(p => p.Slot is >= 0 and < 5 && NetworkSession.CanPetMail(p));
+        _mailType.Normal = () => _mailEdit.Open(_mailCard);
+        _mailType.Pet = () => { _petMailPets.Visible = true; _petMailPets.Refresh(); };
+        _mailType.Back = () => _cardBook.Toggle();
+        _petMailPets.Back = () => { _mailType.Visible = true; _mailType.Refresh(); };
+        _petMailPets.Picked = slot => { _petMailEdit.Open(_mailCard, slot); _petMailItems.Visible = true; _petMailItems.Refresh(); };
+        _petMailItems.Selected = () => _petMailEdit.ItemSlot;
+        _petMailItems.Select = slot => { _petMailEdit.ItemSlot = slot; _petMailEdit.Refresh(); };
+        _petMailEdit.Back = () => { _petMailItems.Visible = false; _petMailPets.Visible = true; _petMailPets.Refresh(); };
+        _petMailEdit.Sent = () => { _petMailItems.Visible = false; _cardBook.Visible = true; _cardBook.Refresh(); };
+        _mailEdit.Back = () => { if (_mailType.HasMailPet()) { _mailType.Visible = true; _mailType.Refresh(); } else _cardBook.Toggle(); };
         _cardBook.ShowRecord = i => _mailRecord.Open(i);
+        _mailRecord.Reply = i => _mailEdit.Open(i);
+        _mailRecord.Back = () => _cardBook.Toggle();
         _cardBook.AskDelete = i =>
         {
             if (_session is NetworkSession nd && nd.Cards[i] is { } card)
@@ -288,7 +377,17 @@ public partial class Main : Node2D
         {
             nsC.CardsChanged += () => { if (_cardBook.Visible) _cardBook.Refresh(); if (_mailEdit.Visible) _mailEdit.Refresh(); };
             nsC.MailReceived += m => { _hudSkin.SetMailLit(true); if (_mailRecord.Visible) _mailRecord.Refresh(); };
-            _hudSkin.MailClicked = () => { _cardBook.Visible = true; _cardBook.Refresh(); ClearMail(); };
+            // 左上「郵件」（官方实测）：有新信 → 直接开最新那封的邮件记录；没有新信时只关掉开着的邮件窗口
+            _hudSkin.MailClicked = () =>
+            {
+                if (nsC.UnreadMail > 0 && nsC.Mails.LastOrDefault(m => m.Incoming) is { } last)
+                {
+                    CloseMailWindows(); _cardBook.Visible = false; _mailRecord.Open(last.CardIndex); ClearMail();
+                }
+                else CloseMailWindows();
+            };
+            nsC.StatusChanged += () => { if (_petMailItems.Visible) _petMailItems.Refresh(); if (_petMailPets.Visible) _petMailPets.Refresh(); };
+            nsC.PetMailEffect += OnPetMailFx;
         }
         _album = new AlbumWindow { Cache = _cache, Session = () => _session as NetworkSession };
         AddChild(_album);
@@ -379,6 +478,30 @@ public partial class Main : Node2D
         _battleUi.CommandArg += (k, t, a) => _session.SubmitCommand(new Command((CommandKind)k, t, a));
         _battleUi.BagItems = () => _session.Player.Items.Select(i => (i.Slot, i.ItemId, i.Count)).ToList();
         _battleUi.ItemLook = id => _session.ItemInfo(id) is { } it ? (it.Name, it.GraphicId) : ("道具", 0);
+        // 自动战斗：「自動」开关（跨场保留，满足停止条件时关掉）、「選項」窗口；手动点的目标记下来给"原定目标"用
+        _auto = new AutoBattle { Options = _cfg.AutoOpts };
+        _autoOpts = new AutoBattleOptions { Auto = _auto, Changed = () => GameConfig.Patch(("auto_opts", _auto.Options)) };
+        AddChild(_autoOpts);
+        _battleUi.AutoToggled = on => _auto.On = on;
+        _battleUi.OptionsPressed = () => _autoOpts.Toggle();
+        _battleUi.CommandTarget += (k, t) => { if (t >= 10) _auto.LastTarget = t; };
+        _session.BattleStarted += _ => { _auto.BattleStarted(); _battleUi.SetAuto(_auto.On); };
+        _session.BattleEnded += _ => _autoOpts.Visible = false;
+        // 战斗录像：「本局錄像」→ 打完存档（缩略图取点按钮那一刻的画面）；系统 → 战斗录像 → 列表 → 播放
+        _replayUi = new BattleUi { Cache = _cache, Cfg = _cfg, ReadOnly = true };
+        AddChild(_replayUi);
+        _videoList = new VideoListWindow { Cache = _cache, Play = StartReplay };
+        AddChild(_videoList);
+        if (_session is NetworkSession nsv)
+        {
+            _battleUi.RecordToggled = on => { nsv.RecordThisBattle = on; if (on) _recThumb = GetViewport().GetTexture().GetImage(); };
+            nsv.BattleRecorded += rec =>
+            {
+                var name = VideoStore.Save(rec, _recThumb);
+                _recThumb = null;
+                _chat.Add($"战斗录制成功（video\\{name}）。", 4);
+            };
+        }
         _dialog = new DialogPanel { Cache = _cache };
         AddChild(_dialog);
         _dialog.ButtonPressed += b => _session.Answer(b);
@@ -422,25 +545,33 @@ public partial class Main : Node2D
         _skills.TechChosen = (sk, t) => _prod?.UseTech(sk, t);
         _skills.Swap = (a, b) => (_session as NetworkSession)?.SwapSkills(a, b);
         AddChild(_skills);
-        _system = new SystemPanel { Cache = _cache, Cfg = _cfg, Toast = t => _toast.Show(t, 2), DrawChanged = SpawnNpcs };
+        _system = new SystemPanel { Cache = _cache, Cfg = _cfg, Toast = t => _toast.Show(t, 2), DrawChanged = () => { SpawnNpcs(); SpawnGround(); } };
         _system.Chosen += k =>
         {
             switch (k)
             {
-                case 0: _system.Visible = false; (_session as NetworkSession)?.Logout(); AddChild(new SetupScreen { Layer = 50 }); break;
-                case 1: _chat.MaxLines = _chat.MaxLines >= 6 ? 2 : _chat.MaxLines + 2; _toast.Show($"聊天显示 {_chat.MaxLines} 行", 2); break;
-                case 2 or 3 or 4 or 5: _system.Open(k); break;   // 音樂 / 滑鼠 / 鍵盤 / 繪圖設定
-                case 7: _system.Visible = false; AddChild(new SetupScreen { Layer = 50, FromGame = true }); break;   // 高级设定：界面模式、显示帧数、服务器（官方这一项的内容还没做）
+                case 0 or 1 or 2 or 3 or 4 or 5 or 7: _system.Open(k); break;   // 登出 / 聊天 / 音樂 / 滑鼠 / 鍵盤 / 繪圖設定 / 高级设定
+                case 6: _system.Visible = false; _videoList.Open(); break;   // 战斗录像列表   // 聊天 / 音樂 / 滑鼠 / 鍵盤 / 繪圖設定
                 default: _toast.Show("这项设定还没做", 2); break;
             }
         };
         AddChild(_system);
+        _phrases = new PhraseWindow { Cache = _cache, Say = t => _chatIn?.Send?.Invoke(t) };
+        AddChild(_phrases);
+        _system.OpenPhrases = () => { _system.Visible = false; _phrases.Open(); };
+        _system.AdvChanged = ApplyAdvCfg; ApplyAdvCfg();
+        _system.LoginPoint = () => (_session as NetworkSession)?.ReturnToLoginPoint();
+        _system.Logout = () => { (_session as NetworkSession)?.Logout(); AddChild(new SetupScreen { Layer = 50 }); };
+        _system.ChatChanged = ApplyChatCfg;
         _items = new ItemPanel { Cache = _cache, Player = () => _session.Player, PlayerAnime = () => _player.AnimeId, Use = sl => (_session as NetworkSession)?.UseItem(sl), Move = (a, b) => (_session as NetworkSession)?.MoveItem(a, b) };
         AddChild(_gold = new GoldWindow { Cache = _cache, Gold = () => _session.Player.Gold });
         if (_session is NetworkSession nsw)
         {
             _items.Wallet = () => { _items.Visible = false; _gold.Open(); };
             _items.SortBag = nsw.SortBag;
+            _items.BagPage = () => nsw.BagPage;
+            _items.SwitchBag = nsw.SwitchBag;
+            nsw.BagPageChanged += () => { if (_items.Visible) _items.Refresh(); };
             _gold.Confirm = v => nsw.DropGold(v);
             _gold.Closed = () => _items.Toggle();
         }
@@ -450,7 +581,7 @@ public partial class Main : Node2D
             // 左边的窗口（状态/技能/宠物/名片/图鉴/系统）都在左上角同一个位置，右边的（地图/物品）都贴右上：
             // 打开一个就把同一边的其它窗口关掉，不叠在一起（手机上叠着根本看不清）
             bool right = i is 0 or 3;
-            var leftWins = new CanvasLayer?[] { _status, _skills, _pets, _petDetail, _cardBook, _mailEdit, _mailRecord, _album, _system };
+            var leftWins = new CanvasLayer?[] { _status, _skills, _pets, _petDetail, _cardBook, _mailEdit, _mailRecord, _mailType, _petMailPets, _petMailEdit, _petMailItems, _album, _system };
             var rightWins = new CanvasLayer?[] { _mapWin, _items, _gold };
             var mine = i switch { 0 => _mapWin, 1 => _status, 2 => _skills, 3 => (CanvasLayer)_items, 4 => _pets, 5 => _cardBook, 6 => _album, 7 => _system, _ => null };
             foreach (var w in right ? rightWins : leftWins) if (w != null && w != mine && !(i == 4 && w == _petDetail)) w.Visible = false;
@@ -472,7 +603,8 @@ public partial class Main : Node2D
         AddChild(_toast);
         _trans = new Transition();
         AddChild(_trans);
-        _chat = new ChatLog();
+        _chat = new ChatLog { MaxLines = Math.Clamp(_cfg.ChatLines, 0, 20) };
+        if (_session is NetworkSession ncs) { ncs.ChatColor = _cfg.ChatColor; ncs.ChatRange = _cfg.ChatRange; }
         AddChild(_chat);
         _chatIn = new ChatInput { ShowButton = _cfg.MobileUi, Send = t => { if (_session is NetworkSession ns) ns.Say(t); else _chat.Add($"{_session.Player.Name}: {t}", 5); } };
         AddChild(_chatIn);
@@ -582,6 +714,8 @@ public partial class Main : Node2D
         {
             if (g.Pet)   // 扔在地上的宠物：画它的动画、头上名字
             {
+                if (_fxHidden.Contains(g.Id)) continue;   // 宠物邮件到达：效果放完才出现
+                if (_cfg.HidePets) continue;               // 系统 → 绘图设定 → 隐藏宠物 / 隐藏两者
                 var ps = new AnimSprite { Cache = _cache, AnimeId = g.Image, Dir = ((g.Dir % 8) + 8) % 8, Act = _cfg.ActStand, FallbackAct = _cfg.ActStand, Position = Iso.ToScreen(g.X, g.Y) };
                 ps.AddChild(NameTag.Make(g.Name, NameTag.NpcColor, -92));
                 _view.Entities.AddChild(ps); _groundNodes.Add(ps);
@@ -865,7 +999,8 @@ public partial class Main : Node2D
         }
         if (!moving && _pendingSteps.Count == 0 && _talkTarget != null && !_session.InBattle) BeginTalk(_talkTarget);
         _player.Act = moving ? _cfg.ActWalk : _cfg.ActStand;
-        if (!_player.Visible && !_battleUi.Visible) { _player.Visible = true; _hudSkin.SetBattle(false); }
+        AutoBattleTick();
+        if (!_player.Visible && !_battleUi.Visible && _replay == null) { _player.Visible = true; _hudSkin.SetBattle(false); }
         if (_resultPending && !_battleUi.Visible && _session is NetworkSession nsr2 && nsr2.LastResult != null) { _resultPending = false; _result.Show(nsr2.LastResult); }
         var m = _session.CurrentMap; var p = _session.Player;
         _hud.Text = $"{(_cfg.UsingTestData ? "[测试素材] " : "")}{m?.Name} (#{m?.MapId})  ({_session.X},{_session.Y})    Lv{p.Level}  经验 {p.Exp}  金钱 {p.Gold}    FPS {Engine.GetFramesPerSecond()}\n" +
@@ -880,7 +1015,7 @@ public partial class Main : Node2D
         if (_func != null) _func.Visible = !c && !_session.InBattle && _session is NetworkSession;
         bool l = (_status?.Visible ?? false) || (_skills?.Visible ?? false) || (_system?.Visible ?? false)
               || (_pets?.Visible ?? false) || (_petDetail?.Visible ?? false)
-              || (_cardBook?.Visible ?? false) || (_album?.Visible ?? false) || (_prod?.AnyVisible ?? false) || (_mailEdit?.Visible ?? false) || (_mailRecord?.Visible ?? false);
+              || (_cardBook?.Visible ?? false) || (_album?.Visible ?? false) || (_prod?.AnyVisible ?? false) || (_mailEdit?.Visible ?? false) || (_mailRecord?.Visible ?? false) || (_mailType?.Visible ?? false) || (_petMailPets?.Visible ?? false) || (_petMailEdit?.Visible ?? false);
         if (l != _leftCovered) { _leftCovered = l; _hudSkin?.SetLeftCovered(l); }
     }
 
@@ -901,6 +1036,7 @@ public partial class Main : Node2D
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.B }) ToggleStall();   // 官方 Ctrl+B 摆摊
         else if (e is InputEventKey { Pressed: true, CtrlPressed: true, Keycode: Key.F }) ToggleEmote();   // 官方 Ctrl+F 情绪动作
         else if (e is InputEventKey ck && _chatIn != null && _chatIn.TryStart(ck)) GetViewport().SetInputAsHandled();   // 直接打字 = 聊天（官方同）
+        else if (e is InputEventKey { Pressed: true, Echo: false } pk && _phrases != null && !(_chatIn?.Typing ?? false) && _phrases.Hotkey(pk.Keycode, pk.CtrlPressed, pk.ShiftPressed)) { }   // 我的口頭禪 F1–F8（空的那条才落到下面的调试键）
         else if (e is InputEventKey { Pressed: true, Keycode: Key.F2 }) _calib?.Toggle();
         else if (e is InputEventKey { Pressed: true, Keycode: Key.F10 }) AddChild(new SetupScreen { Layer = 50 });   // 重新设置（切换单机/联网、改服务器）
         else if (e is InputEventKey { Pressed: true, Keycode: Key.F3 }) _hud.Visible = !_hud.Visible;
@@ -938,6 +1074,8 @@ public partial class Main : Node2D
 
     public override void _Notification(int what)
     {
+        if (_cfg != null && what == NotificationApplicationFocusOut && _cfg.BgSkip) Engine.MaxFps = 10;      // 高级设定 → 后台窗口跳帧
+        else if (what == NotificationApplicationFocusIn) Engine.MaxFps = 60;
         // 从后台回来：连接已经断了但还没轮到重连，就马上连
         if (what == NotificationApplicationResumed && _session is NetworkSession ns && !ns.Connected && _reconnectTimer != null)
         {

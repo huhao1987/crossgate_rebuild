@@ -27,6 +27,7 @@ public partial class ProductionUi : Node
     public ProduceResultWindow Result { get; private set; } = null!;
     public GatherWindow Gathering { get; private set; } = null!;
     public ItemSkillWindow ItemSkill { get; private set; } = null!;
+    public EngraveWindow Engrave { get; private set; } = null!;
     public static double ItemSkillSeconds = 12;
     public int Tech { get; private set; }
     public int TargetSlot { get; private set; } = -1;   // 鉴定 / 修理的道具格
@@ -47,6 +48,7 @@ public partial class ProductionUi : Node
         AddChild(Result = new ProduceResultWindow { Cache = Cache, Ui = this });
         AddChild(Gathering = new GatherWindow { Cache = Cache, Ui = this });
         AddChild(ItemSkill = new ItemSkillWindow { Cache = Cache, Ui = this });
+        AddChild(Engrave = new EngraveWindow { Cache = Cache, Ui = this });
     }
 
     public void Bind(NetworkSession s)
@@ -56,9 +58,9 @@ public partial class ProductionUi : Node
         s.StatusChanged += () => { if (Materials.Visible) Materials.Refresh(); if (Craft.Visible) Craft.Refresh(); if (ItemSkill.Visible) ItemSkill.Refresh(); };
     }
 
-    public bool AnyVisible => Recipes.Visible || Craft.Visible || Materials.Visible || Result.Visible || Gathering.Visible || ItemSkill.Visible;
+    public bool AnyVisible => Recipes.Visible || Craft.Visible || Materials.Visible || Result.Visible || Gathering.Visible || ItemSkill.Visible || Engrave.Visible;
 
-    void HideAll() { Recipes.Visible = Craft.Visible = Materials.Visible = Result.Visible = Gathering.Visible = ItemSkill.Visible = false; }
+    void HideAll() { Recipes.Visible = Craft.Visible = Materials.Visible = Result.Visible = Gathering.Visible = ItemSkill.Visible = Engrave.Visible = false; }
 
     /// <summary>技能详情里点了某个招式。</summary>
     public void UseTech(SkillInfo sk, int tech)
@@ -102,6 +104,7 @@ public partial class ProductionUi : Node
         int mp = ItemMp(it);
         if (s.Player.Mp < mp) { ItemSkill.Message = "魔力不足。"; ItemSkill.Refresh(); return; }
         TargetName = it.Name;
+        if (Skill.SkillId == 220) { ItemSkill.Visible = false; Engrave.Open(); return; }   // 刻印：先开刻印窗口打字
         Working = true; int gen = ++_gen;
         s.SetWork(Skill.SkillId == 219 ? 12 : 13);   // 官方：鉴定 IPy c、修理 IPy d
         ItemSkill.Message = $"{Verb}中 . . ."; ItemSkill.Refresh();
@@ -251,6 +254,16 @@ public partial class ProductionUi : Node
         s.SetWork(5);
         Craft.Visible = false; Materials.Visible = false;
         Result.Show(Skill, r, gather: false, Recipe);
+    }
+    /// <summary>刻印窗口按「刻印」：马上发 sM（官方不发 IPy、不等）。</summary>
+    public void DoEngrave(string text)
+    {
+        var s = Session(); if (s == null || Skill == null || Working || TargetSlot < 0) return;
+        text = text.Trim();
+        if (text.Length == 0) return;
+        Working = true; _gen++;
+        Engrave.Visible = false;
+        s.UseOnItem(Skill.Slot, Tech, TargetSlot, text);
     }
     public NetworkSession.ProduceResult? LastResult { get; private set; }
     public string TreatName = "";
@@ -467,6 +480,36 @@ public partial class GatherWindow : CgWindow
         }
         if (Running) { Txt($"{sk.Name}中 . . .", 145, 186, center: true); Btn(23395, 23396, 95, 218, () => Ui.StopGather()); }
         else Btn(23400, 23401, 95, 218, () => Ui.StartGather(sk));
+    }
+}
+
+/// <summary>
+/// 刻印（23355，272×104 贴右在 (688,0)，官方实测）：選擇物品里选好道具按「刻印」后出现。蓝色输入条 (13,39) 152×18 打要刻的字，
+/// 「刻印」23372 在 (165,71) → sM 栏 招式 格 文字。关掉 = 不刻。
+/// </summary>
+public partial class EngraveWindow : CgWindow
+{
+    public ProductionUi Ui = null!;
+    private LineEdit _edit = null!;
+    public string Text { get => _edit.Text; set => _edit.Text = value; }
+    public override void _Ready()
+    {
+        Layer = 16; Visible = false; Build(new Vector2(688, 0), true);
+        _edit = new LineEdit { Position = new Vector2(16, 39), Size = new Vector2(148, 18), Flat = true, MaxLength = 16, ContextMenuEnabled = false };
+        _edit.AddThemeColorOverride("font_color", Colors.White);
+        _edit.AddThemeFontSizeOverride("font_size", 13);
+        _edit.AddThemeStyleboxOverride("normal", new StyleBoxEmpty()); _edit.AddThemeStyleboxOverride("focus", new StyleBoxEmpty());
+        _edit.TextSubmitted += t => Ui.DoEngrave(t);
+        Win.AddChild(_edit);
+    }
+    public void Open() { _edit.Text = ""; Visible = true; Refresh(); _edit.GrabFocus(); }
+    public override void Refresh()
+    {
+        Clear();
+        Img(23355, 0, 0, block: true);
+        Btn(22509, 22510, 246, 6, () => Ui.CloseAll());
+        Btn(23372, 23373, 165, 71, () => Ui.DoEngrave(_edit.Text));
+        _edit.MoveToFront();
     }
 }
 
