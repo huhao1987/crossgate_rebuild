@@ -396,6 +396,7 @@ public sealed class NetworkSession : IGameSession
             case "dAgg":  // EN：进入战斗（"dAgg 0 0" = 对战/突袭失败，官方随后 "Zd 突发战斗失败"）
                 if (f.Length > 0 && f[0] == "0") break;
                 BattleType = f.Length > 0 ? D62Safe(f[0]) : 0;
+                BattleBackdrop = f.Length > 1 ? D62Safe(f[1]) : 0;   // 战斗底图（exe 0x455e1a 存 0x186fd7c；本服野外是 22970/22971）
                 InBattle = true; _battleShown = false; _turn = 0; _units.Clear(); _down.Clear(); _lastTurnAnswered = -1;
                 break;
             case "LYIm":  // B：战斗
@@ -1737,6 +1738,8 @@ public sealed class NetworkSession : IGameSession
     public int CommandSlot { get; private set; } = -1;
     /// <summary>EN 第 1 段 = 战斗种类（普通遇敌 1；官方自动战斗"战斗为 BOSS 战时停止"看的是 4–6，exe 0x407dd3）。</summary>
     public int BattleType { get; private set; }
+    /// <summary>EN 第 2 段：战斗底图图号（0 = 没给）。</summary>
+    public int BattleBackdrop { get; private set; }
     /// <summary>服务端时间 − 本机时间（秒），游戏内昼夜用。</summary>
     public long ServerTimeOffset { get; private set; }
     /// <summary>自己角色的形象编号（服务端 C 包里自己那一条的第 6 段，例如 106002）；0 = 还不知道。</summary>

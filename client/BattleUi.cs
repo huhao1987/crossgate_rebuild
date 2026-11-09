@@ -64,7 +64,8 @@ public partial class BattleUi : CanvasLayer
         _root = new Control { AnchorRight = 1, AnchorBottom = 1, MouseFilter = Control.MouseFilterEnum.Stop };
         AddChild(_root);
         _root.GuiInput += OnRootInput;
-        _root.AddChild(new BattleGrid { MouseFilter = Control.MouseFilterEnum.Ignore, AnchorRight = 1, AnchorBottom = 1 });
+        _grid = new BattleGrid { Cache = Cache, MouseFilter = Control.MouseFilterEnum.Ignore, AnchorRight = 1, AnchorBottom = 1 };
+        _root.AddChild(_grid);
         _stage = new Node2D { YSortEnabled = true };
         _root.AddChild(_stage);
         _status = new Label { Position = new Vector2(24, 16) };
@@ -97,8 +98,12 @@ public partial class BattleUi : CanvasLayer
     private static readonly int[] SlotOrder = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
     private Vector2 SlotPos(int slot) => Size / 2 + (Slots[Math.Clamp(slot, 0, 19)] - new Vector2(320, 240));
 
+    private BattleGrid _grid = null!;
+    /// <summary>这场战斗的底图（联网 = EN 第 2 段）。</summary>
+    public Func<int>? Backdrop;
     public void Show(BattleView v)
     {
+        _grid.Backdrop = Backdrop?.Invoke() ?? 0; _grid.Fix = Cfg.BattleBgFix; _grid.QueueRedraw();
         foreach (var c in _stage.GetChildren()) c.QueueFree();
         _gen++; _units.Clear(); _queue.Clear(); _lines.Clear(); _running = false;
         PlayedEvents = 0; AttackAnimsShown = 0; _turnStart = -1; _picking = false; _slot = 0; _hasPet = BattlePet?.Invoke() != null;
@@ -1101,20 +1106,74 @@ public partial class EffectRing : Node2D
     }
 }
 
-/// <summary>战斗时叠在地图上的等距格子线（官方客户端战斗画面有这层细线）。</summary>
+/// <summary>
+/// 战斗时叠在地图上的那层（官方 exe 0x407e8f 起，战斗底图 = EN 第 2 段）：
+///   底图在 22130–22149 或 22970–22979（22977 除外）时：只把底图的四个角贴到画面四角
+///     （底图里半透明棋盘点那片不画；左上 125×95 取 (0,0)、右上 256×192 取 (386,0)、左下 146×111 取 (0,369)、右下 146×111 取 (494,369)），
+///     然后「战斗背景修正」开着就整屏盖一层半透明暗棕（实测 背景×0.72 + (19,11,5)），
+///     再从 (−124,−52) 起每 128×48 贴一块菱形格（隔行错开 64）：修正开 = PNG 243（只有边线），关 = BMP 221（边线 + 棋盘点的棕色底）。
+///   其它底图：整张画在画面中间（这个服务端没见到）。
+/// </summary>
 public partial class BattleGrid : Control
 {
+    public TextureCache? Cache;
+    public int Backdrop;
+    public bool Fix = true;
+    private static ImageTexture? _line;
+
+    public static bool Tiled(int bg) => bg == 0 || (bg is >= 22130 and <= 22149) || (bg is >= 22970 and <= 22979 && bg != 22977);
+
     public override void _Draw()
     {
-        var sz = Size; var c = new Color(0.12f, 0.06f, 0.04f, 0.7f);
-        // 等距格：沿 (32,-24) 与 (32,24) 两个方向的平行线，间距一个格子
-        var center = sz / 2 + new Vector2(-32, 0);   // 玩家所在格的左角：线沿格子边走
-        for (int k = -40; k <= 40; k++)
+        var sz = Size; float w = sz.X, h = sz.Y;
+        var tex = Backdrop > 0 ? Solid(Backdrop) : null;
+        if (!Tiled(Backdrop))
         {
-            var o1 = center + new Vector2(32, 24) * k;
-            DrawLine(o1 - new Vector2(32, -24) * 40, o1 + new Vector2(32, -24) * 40, c, 1);
-            var o2 = center + new Vector2(32, -24) * k;
-            DrawLine(o2 - new Vector2(32, 24) * 40, o2 + new Vector2(32, 24) * 40, c, 1);
+            if (tex != null) DrawTexture(tex, (sz - tex.GetSize()) / 2);
+            return;
         }
+        if (tex != null)
+        {
+            void Corner(float dx, float dy, float sx, float sy, float cw, float ch) => DrawTextureRectRegion(tex, new Rect2(dx, dy, cw, ch), new Rect2(sx, sy, cw, ch));
+            Corner(0, 0, 0, 0, 125, 95);
+            Corner(w - 256, 0, 386, 0, 256, 192);
+            Corner(0, h - 111, 0, 369, 146, 111);
+            Corner(w - 146, h - 111, 494, 369, 146, 111);
+        }
+        if (Fix) DrawRect(new Rect2(Vector2.Zero, sz), new Color(68 / 255f, 39 / 255f, 18 / 255f, 0.28f));
+        var tile = Fix ? Line() : ExeArt.Bmp(221);
+        if (tile == null) return;
+        int toggle = 0;
+        for (float y = -52, x = -124; y <= h;)
+        {
+            DrawTexture(tile, new Vector2(x, y));
+            x += 128;
+            if (x > w) { y += 48; toggle = 1 - toggle; x = 4 - toggle * 64; }
+        }
+    }
+
+    /// <summary>底图里的棋盘点（半透明的那片菱形）官方画出来是看不见的（实测角上透出地图、没有网点）：只留实心的像素。</summary>
+    private int _solidId = -1; private ImageTexture? _solid;
+    private ImageTexture? Solid(int id)
+    {
+        if (id == _solidId) return _solid;
+        _solidId = id; _solid = null;
+        if (Cache?.ImageNo(id).Tex is not { } t) return null;
+        var im = t.GetImage(); im.Convert(Image.Format.Rgba8);
+        for (int y = 0; y < im.GetHeight(); y++)
+            for (int x = 0; x < im.GetWidth(); x++)
+                if (im.GetPixel(x, y).A < 0.99f) im.SetPixel(x, y, new Color(0, 0, 0, 0));
+        return _solid = ImageTexture.CreateFromImage(im);
+    }
+
+    /// <summary>PNG 243（黑色当透明）。</summary>
+    private static ImageTexture? Line()
+    {
+        if (_line != null || ExeArt.Png(243) is not { } t) return _line;
+        var im = t.GetImage(); im.Convert(Image.Format.Rgba8);
+        for (int y = 0; y < im.GetHeight(); y++)
+            for (int x = 0; x < im.GetWidth(); x++)
+                if (im.GetPixel(x, y) is { R: 0, G: 0, B: 0 }) im.SetPixel(x, y, new Color(0, 0, 0, 0));
+        return _line = ImageTexture.CreateFromImage(im);
     }
 }

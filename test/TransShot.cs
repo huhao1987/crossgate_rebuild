@@ -1,6 +1,6 @@
 using Godot;
 namespace CgPort.Godot.Tests;
-/// <summary>过场效果截图：进战斗（洞往外扩）和出战斗（黑屏后开洞）各拍 4 张。</summary>
+/// <summary>过场效果截图：默认 / 仿石器各拍「拿走」和「放进来」。</summary>
 public partial class TransShot : SceneTree
 {
     int _f; Main _m = null!;
@@ -15,15 +15,18 @@ public partial class TransShot : SceneTree
     public override bool _Process(double d)
     {
         _f++;
-        // 进战斗：拍地图当"旧画面"，然后把战斗区域换成一块纯色（看得出洞），停在 0.1/0.3/0.5/0.7
-        if (_f == 60) { _m.Trans.Enter(); _m.Trans.Freeze(0.05f); }
-        float[] ps = { 0.1f, 0.3f, 0.5f, 0.7f };
-        for (int i = 0; i < 4; i++)
+        var t = _m.Trans;
+        // 两种样式各拍：拿走第 20 帧、拿走快结束、放进来第 30 帧（暂停后手动步进，好对照官方）
+        if (_f == 60 || _f == 140)
         {
-            if (_f == 62 + i * 6) _m.Trans.Freeze(ps[i]);
-            if (_f == 65 + i * 6) Root.GetTexture().GetImage().SavePng($"res://test/out_trans_in_{i}.png");
+            t.StyleOf = () => _f < 100 ? 0 : 1; t.Paused = true; t.Enter(); t.Advance(20);
         }
-        if (_f == 100) { File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
+        int b = _f < 100 ? 60 : 140, st = _f < 100 ? 0 : 1;
+        if (_f == b + 3) { Root.GetTexture().GetImage().SavePng($"res://test/out_trans{st}_out20.png"); GD.Print($"样式{st} {t.PhaseName} 帧{t.Frame}"); }
+        if (_f == b + 5) { while (t.Running && t.PhaseName == "Out") t.Advance(1); GD.Print($"样式{st} 拿走结束后：{t.PhaseName}"); t.Advance(30); }
+        if (_f == b + 8) { Root.GetTexture().GetImage().SavePng($"res://test/out_trans{st}_in30.png"); GD.Print($"样式{st} {t.PhaseName} 帧{t.Frame}"); }
+        if (_f == b + 10) { int n = 0; while (t.Running && n < 2000) { t.Advance(1); n++; } GD.Print($"样式{st} 放进来再走 {n} 帧结束，Running={t.Running}"); }
+        if (_f == 200) { File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
         return false;
     }
 }

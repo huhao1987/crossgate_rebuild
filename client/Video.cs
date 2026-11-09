@@ -179,7 +179,7 @@ public partial class VideoPlayer : Node
     {
         _s = new NetworkSession(new NetworkOptions());
         _s.SetReplayName(Rec.Recorder);
-        _s.BattleStarted += v => Ui.Show(v);
+        _s.BattleStarted += v => { Ui.Backdrop = () => _s.BattleBackdrop; Ui.Show(v); };
         _s.TurnResolved += (ev, v) => Ui.AppendLog(ev, v);
         _s.BattleEnded += o => { Ui.Close(o); _ended = true; };
         Ui.ReadOnly = true;

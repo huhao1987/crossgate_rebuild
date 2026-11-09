@@ -471,7 +471,7 @@ public partial class Main : Node2D
         ui.AddChild(calBtn);
         CallDeferred(nameof(ApplySkinLayout), bagBtn, calBtn);
 
-        _battleUi = new BattleUi { Cache = _cache, Cfg = _cfg };
+        _battleUi = new BattleUi { Cache = _cache, Cfg = _cfg, Backdrop = () => (_session as NetworkSession)?.BattleBackdrop ?? 0 };
         AddChild(_battleUi);
         _battleUi.CommandsPerTurn = _session is NetworkSession ? 2 : 1;
         _battleUi.Closed += () => _trans?.Exit();
@@ -612,7 +612,7 @@ public partial class Main : Node2D
         };
         _toast = new Toast();
         AddChild(_toast);
-        _trans = new Transition();
+        _trans = new Transition { StyleOf = () => _cfg.TransStyle };
         AddChild(_trans);
         _chat = new ChatLog { MaxLines = Math.Clamp(_cfg.ChatLines, 0, 20) };
         if (_session is NetworkSession ncs) { ncs.ChatColor = _cfg.ChatColor; ncs.ChatRange = _cfg.ChatRange; }
