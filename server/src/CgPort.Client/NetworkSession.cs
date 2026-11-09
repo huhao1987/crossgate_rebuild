@@ -2122,6 +2122,16 @@ public sealed class NetworkSession : IGameSession
         int? header = null;
         if (bar >= 0 && int.TryParse(data[..bar].Replace("\\S", "").Trim(), out var h)) { header = h; data = data[(bar + 1)..]; }
         DialogPage page;
+        if (type == 27)
+        {
+            // 交易入口（Brushman 等，exe 0x41fa41 读、0x428d82 画）：头像|NPC名|话|，选项固定「想 交 易」「 没  事 」
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n").Trim('\n') : "";
+            page = new DialogPage(T(2), new List<string>(), false, new List<string> { "想交易", "没事" })
+            { Kind = "trademenu", NpcName = T(1), Face = int.TryParse(q[0], out var fc) ? fc : 0 };
+            DialogChanged?.Invoke(page);
+            return;
+        }
         if (type == 16)
         {
             // 技能导师（Skillmaster）入口：头像|NPC名|话|，选项固定（官方实测）：想学习技能 / 想忘记技能 / 还是算了 → xD … 0 1/2/3
@@ -2162,6 +2172,54 @@ public sealed class NetworkSession : IGameSession
             }
             page = page with { NpcName = common.Npc, Face = common.Face };
         }
+        else if (type == 28)
+        {
+            // 兑换（Brushman「想交易」之后，exe 0x420881 读、0x428ff6 画）：头像|NPC名|话|数量不足的话|物品栏满的话|拿来换的道具编号|它的名字|
+            // 然后每件 5 段：名字|图像|每个要几个|一格放几个|说明（最多 28 件）。回 "序号|数量|序号|数量"（exe "%d|%d" 用 | 连，结尾不带）。
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n").Trim('\n') : "";
+            int N(int i) => i < q.Length && int.TryParse(q[i].Trim(), out var v) ? v : 0;
+            var list = new List<ShopEntry>();
+            for (int i = 7; i + 4 < q.Length + 1 && list.Count < 28; i += 5)
+            {
+                if (T(i).Length == 0) break;
+                list.Add(new ShopEntry(T(i), N(i + 1), N(i + 2), T(i + 4), 0, -1, Math.Max(1, N(i + 3))));
+            }
+            page = new DialogPage(T(2), new List<string> { "cancel" }, false)
+            { Kind = "exchange", Shop = list, AltTexts = new[] { T(3), T(4) }, NpcName = T(1), Face = N(0), SourceItem = N(5), SourceName = T(6) };
+        }
+        else if (type == 19)
+        {
+            // 治疗（Injurydoctor）：每人 4 段 等级|受伤程度(0–100)|名字|费用，最多 6 个（exe 0x41fd7a）。选第 k 个发 "k"（从 1 数），全部一起发 "7"。
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            var list = new List<ShopEntry>();
+            for (int i = 0; i + 3 < q.Length && list.Count < 6; i += 4)
+            {
+                var name = Unesc(q[i + 2]).Trim();
+                if (name.Length == 0) break;
+                int Ni(int k) => int.TryParse(q[k].Trim(), out var v) ? v : 0;
+                list.Add(new ShopEntry(name, Ni(i + 1), Ni(i + 3), "", Ni(i)));
+            }
+            page = new DialogPage("", new List<string> { "cancel" }, false) { Kind = "heal", Shop = list };
+        }
+        else if (type is 20 or 22)
+        {
+            // 鉴定（20，Judgeman）/ 修理（22，Repairman）：头像|NPC名|然后每件 7 段：名字|图像|单价|格子|?|?|说明（exe 0x41feab / 0x420b76）
+            // 话不是服务端给的，是客户端自己的两句（exe 0x47c900 / 0x47c920，修理 0x420b76 里的两句），没东西可选时服务端只发 头像|名字
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            string T(int i) => i < q.Length ? Unesc(q[i]).Trim() : "";
+            int N(int i) => i < q.Length && int.TryParse(q[i].Trim(), out var v) ? v : 0;
+            var list = new List<ShopEntry>();
+            for (int i = 2; i + 3 < q.Length && list.Count < 28; i += 7)
+            {
+                if (T(i).Length == 0) break;
+                // 修理多存两段：第 6 段（3 字节）、第 7 段说明（20 字节折行，exe 0x420d5f）；鉴定只读前 5 段
+                list.Add(new ShopEntry(T(i), N(i + 1), N(i + 2), type == 22 ? T(i + 6) : "", 1, N(i + 3), 1));
+            }
+            bool judge = type == 20;
+            page = new DialogPage(judge ? "\n欢迎光临。\n要鉴定哪一件物品？" : "\n\n欢迎光临。\n要修理哪一个呢？", new List<string> { "cancel" }, false)
+            { Kind = judge ? "judge" : "repair", Shop = list, AltTexts = new[] { "\n很抱歉，您的钱不够。", "" }, NpcName = T(1), Face = N(0) };
+        }
         else
         {
             page = WindowText.Build(type, mask, string.Join("\n", data.Split("\\\\n").Select(Unesc)), header);
@@ -2180,6 +2238,7 @@ public sealed class NetworkSession : IGameSession
             int n = int.Parse(button[4..]) + 1;
             if (w.Type == 5 && n == 3) { DialogChanged?.Invoke(null); return; }
             if (w.Type == 16 && n == 3) { DialogChanged?.Invoke(null); return; }   // 还是算了
+            if (w.Type == 27) { if (n == 2) { DialogChanged?.Invoke(null); return; } n = 0; }   // 交易入口：想交易发 "0"（exe 0x428e78 发的是选项序号 0），没事只关窗口
             sel = n.ToString();
         }
         else if (button.StartsWith("buy:") || button.StartsWith("sell:"))
@@ -2189,6 +2248,16 @@ public sealed class NetworkSession : IGameSession
             sel = button.StartsWith("buy:")
                 ? string.Concat(items.Select(x => $"{x[0]}\\\\z{x[1]}\\\\z"))
                 : string.Join("\\\\z", items.Select(x => $"{x[0]}\\\\z{x[1]}"));
+        }
+        else if (button.StartsWith("swap:"))
+        {
+            // 兑换："序号|数量|序号|数量"，| 转义成 \\z，结尾不带
+            sel = string.Join("\\\\z", button[5..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Replace(":", "\\\\z")));
+        }
+        else if (button.StartsWith("pick:"))
+        {
+            // 鉴定 / 修理：选中的每件发 "格子|"（exe "%d|"，结尾也带），| 转义成 \\z
+            sel = string.Concat(button[5..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => $"{x}\\\\z"));
         }
         else if (button.StartsWith("data:")) sel = button[5..];   // 原样数据（买卖列表等），字段内的 \\z 已由调用方写好
         else btn = B62(WindowButtons.FirstOrDefault(b => b.Name == button).Bit);   // 按钮值也是 62 进制：下一页 32 发 "w"（官方抓包），发 "32" 服务端不理

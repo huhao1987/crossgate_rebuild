@@ -160,7 +160,7 @@ public partial class ShopMenuWindow : CgWindow
 
     public void ShowPage(DialogPage? p)
     {
-        _page = p?.Kind == "shop" ? p : null;
+        _page = p?.Kind is "shop" or "skillmenu" or "trademenu" ? p : null;
         Visible = _page != null;
         if (Visible) Refresh();
     }
@@ -179,21 +179,31 @@ public partial class ShopMenuWindow : CgWindow
         }
         var lines = Wrap(p.Text.Replace("\n", ""), 26).Take(5).ToList();
         for (int k = 0; k < lines.Count; k++) Txt(lines[k], 97 + Ox, 44 + 21 * k + Oy + 6, Colors.White);
-        string[] labels = { " 想  买 ", " 想  卖 ", "不 必 了" };
+        // 同一个背景的三种入口：商店（BZ 5，0x423681）、技能导师（BZ 16，0x425e94：字 (150,157+24k)，点的范围 x 140–260）、
+        // 交易入口（BZ 27，0x428d82：两项 (170,177+24k)）
+        var (labels, x0, y0) = p.Kind switch
+        {
+            "skillmenu" => (new[] { " 想学习技能 ", " 想忘记技能 ", "  还是算了 " }, 150f, 157f),
+            "trademenu" => (new[] { "想 交 易", " 没  事 " }, 170f, 177f),
+            _ => (new[] { " 想  买 ", " 想  卖 ", "不 必 了" }, 170f, 157f),
+        };
         var opts = p.Options ?? new List<string>();
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < labels.Length; i++)
         {
             if (i >= opts.Count || opts[i].Length == 0) continue;
-            int ii = i; float y = 157 + 24 * i + Oy;
-            Txt(labels[i], 170 + Ox, y + 6, Colors.White);
-            Hit(170 + Ox - 2, y, 66, 20, _ => Pick(ii), box: false);
+            int ii = i; float y = y0 + 24 * i + Oy;
+            Txt(labels[i], x0 + Ox, y + 6, Colors.White);
+            float w = labels[i].Sum(CgText.Cells) * CgText.CellW;
+            if (p.Kind == "skillmenu") Hit(140 + Ox, y - 3, 120, 23, _ => Pick(ii), box: false);
+            else Hit(x0 + Ox - 2, y, w + 4, 20, _ => Pick(ii), box: false);
         }
-        Btn(22509, 22510, 280, 8, () => Pick(2));
+        Btn(22509, 22510, 280, 8, () => Pick(labels.Length - 1));
     }
 
     public void Pick(int i)
     {
-        GameAudio.Se(i == 2 ? 57 : 79);
+        // 最后一项（不必了 / 还是算了）音效 57；交易入口两项都是 79（exe 0x428eb4）
+        GameAudio.Se(_page?.Kind != "trademenu" && i == (_page?.Kind == "trademenu" ? 1 : 2) ? 57 : 79);
         Visible = false;
         Choose?.Invoke(i);
     }

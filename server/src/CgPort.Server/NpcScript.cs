@@ -124,6 +124,9 @@ public sealed record DialogPage(string Text, IReadOnlyList<string> Buttons, bool
     public IReadOnlyList<ShopEntry>? Shop { get; init; }
     /// <summary>商店买窗口的另外两句话：[0] 钱不够、[1] 背包放不下（BZ 6 第 4、5 段）。</summary>
     public IReadOnlyList<string>? AltTexts { get; init; }
+    /// <summary>兑换（BZ 28）：拿来换的道具编号和名字（"银"）；持有数量由客户端按道具编号数背包。</summary>
+    public int SourceItem { get; init; }
+    public string SourceName { get; init; } = "";
 }
 
 /// <summary>商店列表里的一项。买：Price 是单价、Max 是一次最多买几个；卖：Slot 是背包格子、Count 是持有数量。</summary>

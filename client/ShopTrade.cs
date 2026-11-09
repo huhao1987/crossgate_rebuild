@@ -31,6 +31,15 @@ public partial class ShopTradeWindow : CgWindow
     private bool _confirm, _all;
     private Control? _confirmBox;
     public bool Buying => _page?.Kind == "buy";
+    /// <summary>鉴定（WN 20，exe 0x42700c）/ 修理（WN 22，exe 0x429b7d）：跟卖窗口同一个样子，每件只能选 0 / 1（▲ 上限 1），价钱黄字（色 4），
+    /// 按钮 鉴定 23083/23085（没选 23084）、修理 23080/23082（没选 23081）；确认框只列名字 "%-22s"；是 → xD … 0 "格子|格子|…"。</summary>
+    public bool Picking => _page?.Kind is "judge" or "repair";
+    /// <summary>兑换（WN 28，exe 0x428ff6）：背景 23330，跟买窗口同样子；金币那两格换成 "持有的拿来换的道具数 个" / "要交出几个 个"（"个" 黄字 (530,…)）；
+    /// 每件 "%6d" 每个要几个 (x+40,y+4)（没选灰字）+ "个" (x+110)；按钮 兑换 23331/23332（没选 23333）。
+    /// 官方 exe 这里 ▲ 带了"要检查能不能卖"的旗标，而兑换的那一栏从来没填，所以官方客户端点 ▲ 永远"无法再增加"——移植照原意让它能加。</summary>
+    public bool Exchanging => _page?.Kind == "exchange";
+    public Func<int, int> CountOf = _ => 0;   // 背包里某道具编号一共几个
+    private bool Judge => _page?.Kind == "judge";
     public DialogPage? Page => _page;
     public int PageNo => _pageNo;
     public int Message => _msg;
@@ -41,13 +50,13 @@ public partial class ShopTradeWindow : CgWindow
 
     public void ShowPage(DialogPage? p)
     {
-        if (p?.Shop == null || p.Kind is not ("buy" or "sell")) { _page = null; Visible = false; return; }
+        if (p?.Shop == null || p.Kind is not ("buy" or "sell" or "judge" or "repair" or "exchange")) { _page = null; Visible = false; return; }
         _page = p; _qty = new int[p.Shop.Count]; _pageNo = 0; _msg = 0; _confirm = false; _all = false; _hover = -1;
         Visible = true; Refresh();
     }
 
     private int Pages => Math.Max(1, (_page!.Shop!.Count + 9) / 10);
-    private long Total() => _page?.Shop is { } l ? l.Select((e, i) => (long)e.Price * (Buying ? _qty[i] : _qty[i] / Math.Max(1, e.Stack))).Sum() : 0;
+    private long Total() => _page?.Shop is { } l ? l.Select((e, i) => (long)e.Price * (Buying || Picking || Exchanging ? _qty[i] : _qty[i] / Math.Max(1, e.Stack))).Sum() : 0;
     private int Selected => _qty.Count(q => q > 0);
     /// <summary>买：除了第 skip 件，其它已选的要占几格（每件 ⌈数量 / 一格几个⌉）。</summary>
     private int SlotsUsed(int skip = -1) => _page!.Shop!.Select((e, i) => i == skip || _qty[i] == 0 ? 0 : (_qty[i] + Math.Max(1, e.Max) - 1) / Math.Max(1, e.Max)).Sum();
@@ -58,12 +67,13 @@ public partial class ShopTradeWindow : CgWindow
         if (_page?.Shop is not { } list) return;
         // 确认时官方把商店窗口关掉、原地换成 640×408 的确认框（0x424074：状态 1 重建 [0x1870444]），列表不画
         if (_confirm) { BuildConfirm(); return; }
-        Img(23055, 0, 0, block: true);
+        Img(Exchanging ? 23330 : 23055, 0, 0, block: true);
         Txt(_page.NpcName, 288, 14, Colors.White, center: true);
         // 对话框：鼠标停在道具上显示道具说明，否则显示这一句
         var said = _hover >= 0 && _hover < list.Count ? list[_hover].Name + "\n" + list[_hover].Desc
             : _msg == 0 || _page.AltTexts == null ? _page.Text : _page.AltTexts[_msg - 1];
-        var lines = said.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0).SelectMany(l => ShopMenuWindow.Wrap(l, 26)).Take(_hover >= 0 ? 8 : 5).ToList();
+        // 鉴定 / 修理的话是客户端自己的（开头带空行，官方照样空一行）
+        var lines = said.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 || (Picking && _hover < 0)).SelectMany(l => l.Length == 0 ? new List<string> { "" } : ShopMenuWindow.Wrap(l, 26)).Take(_hover >= 0 ? 8 : 5).ToList();
         for (int k = 0; k < lines.Count; k++) Txt(lines[k], 378, 54 + 21 * k, Colors.White);
         if (_page.Face > 0)
         {
@@ -74,7 +84,7 @@ public partial class ShopTradeWindow : CgWindow
         Txt($"{_pageNo + 1}/{Pages}", 189, 50, Colors.White, center: true);
         CBtn(23022, 23026, 147, 52, () => Turn(-1), "切换页数。");
         CBtn(23023, 23027, 226, 52, () => Turn(1), "切换页数。");
-        if (!Buying && ExeArt.Bmp(_all ? 171 : 172) is { } allTex)
+        if (!Buying && !Picking && !Exchanging && ExeArt.Bmp(_all ? 171 : 172) is { } allTex)
         {
             var b = BtnTex(allTex, allTex, 272 - allTex.GetWidth() / 2f, 40 - allTex.GetHeight() / 2f, ToggleAll);
             if (b != null) b.TooltipText = _all ? "取消全选。" : "全部选择。";
@@ -85,12 +95,17 @@ public partial class ShopTradeWindow : CgWindow
             var e = list[i];
             float cx = 20 + 176 * (k / 5), cy = 127 + 68 * (k % 5);
             if (Cache.ImageNo(e.Image).Tex is { } t) Body.AddChild(new TextureRect { Texture = t, Position = new Vector2(cx + 24, cy - 11) - t.GetSize() / 2, MouseFilter = Control.MouseFilterEnum.Ignore });
-            if (Buying && e.Flag == 0) Txt("×", cx + 37, cy + 8, new Color(1, 0.2f, 0.2f));
-            if (!Buying && e.Stack > 1) Txt($"{e.Stack}/组", cx + 1, cy + 11, new Color(0.5f, 1, 0.5f));
-            int shown = Buying ? _qty[i] : _qty[i] / Math.Max(1, e.Stack);
+            if (Buying && !Exchanging && e.Flag == 0) Txt("×", cx + 37, cy + 8, new Color(1, 0.2f, 0.2f));
+            if (!Buying && !Picking && !Exchanging && e.Stack > 1) Txt($"{e.Stack}/组", cx + 1, cy + 11, new Color(0.5f, 1, 0.5f));
+            int shown = Buying || Picking || Exchanging ? _qty[i] : _qty[i] / Math.Max(1, e.Stack);
             Txt(shown.ToString(), 80 + cx, cy - 28, Colors.White, right: true);
-            var priceColor = Buying ? (e.Flag == 0 ? new Color(0.6f, 0.6f, 0.6f) : Colors.White) : (e.Flag == 0 ? new Color(1, 0.25f, 0.25f) : Colors.White);
-            Txt(e.Price.ToString(), cx + 126, cy - 1, priceColor, right: true);
+            var priceColor = Picking ? ChatLog.Palette[4] : Buying ? (e.Flag == 0 ? new Color(0.6f, 0.6f, 0.6f) : Colors.White) : (e.Flag == 0 ? new Color(1, 0.25f, 0.25f) : Colors.White);
+            if (Exchanging)
+            {
+                Txt(e.Price.ToString(), cx + 119, cy - 1, _qty[i] == 0 ? ChatLog.Palette[7] : Colors.White, right: true);
+                Txt("个", cx + 138, cy - 1, ChatLog.Palette[4]);
+            }
+            else Txt(e.Price.ToString(), cx + 126, cy - 1, priceColor, right: true);
             int ii = i;
             var hit = Hit(cx, cy - 35, 47, 47, _ => { }, box: false);
             hit.MouseEntered += () => { _hover = ii; Refresh(); };
@@ -99,10 +114,23 @@ public partial class ShopTradeWindow : CgWindow
             CBtn(23021, 23025, cx + 142, cy - 27, () => Add(ii, -1), "减少此物品数量。");
         }
         long total = Total();
-        Txt(Gold().ToString(), 512, 291, Colors.White, right: true);
-        Txt(total.ToString(), 512, 343, Buying && Gold() < total ? new Color(1, 0.25f, 0.25f) : Colors.White, right: true);
+        long have = Exchanging ? CountOf(_page.SourceItem) : Gold();
+        Txt(have.ToString(), 512, 291, Colors.White, right: true);
+        Txt(total.ToString(), 512, 343, (Buying || Picking || Exchanging) && have < total ? new Color(1, 0.25f, 0.25f) : Colors.White, right: true);
         bool any = Selected > 0;
-        if (Buying)
+        if (Exchanging) { Txt("个", 530, 291, ChatLog.Palette[4]); Txt("个", 530, 343, ChatLog.Palette[4]); }
+        if (Exchanging)
+        {
+            if (any) CBtn(23331, 23332, 421, 391, Ok, "兑换指定物品。"); else CImg(23333, 421, 391);
+            CBtn(23076, 23077, 516, 391, Cancel, "取消交易。");
+        }
+        else if (Picking)
+        {
+            int b0 = Judge ? 23083 : 23080;
+            if (any) CBtn(b0, b0 + 2, 421, 391, Ok, Judge ? "鉴定指定物品。" : "修理指定物品。"); else CImg(b0 + 1, 421, 391);
+            CBtn(23076, 23077, 516, 391, Cancel, Judge ? "取消鉴定。" : "取消修理。");
+        }
+        else if (Buying)
         {
             if (any) CBtn(23073, 23075, 421, 391, Ok, "购买指定物品。"); else CImg(23074, 421, 391);
             CBtn(23076, 23077, 516, 391, Cancel, "不买了。");
@@ -127,10 +155,10 @@ public partial class ShopTradeWindow : CgWindow
     {
         if (_page?.Shop is not { } list || i < 0 || i >= list.Count) return;
         var e = list[i];
-        int step = Buying ? 1 : Math.Max(1, e.Stack);
+        int step = Buying || Picking || Exchanging ? 1 : Math.Max(1, e.Stack);
         if (dir > 0)
         {
-            int max = Buying ? Math.Min(120, Math.Max(0, FreeSlots() - SlotsUsed(i)) * Math.Max(1, e.Max)) : e.Flag == 0 ? 0 : e.Count / step;
+            int max = Picking ? 1 : Exchanging ? (int)((CountOf(_page.SourceItem) - (Total() - (long)e.Price * _qty[i])) / Math.Max(1, e.Price)) : Buying ? Math.Min(120, Math.Max(0, FreeSlots() - SlotsUsed(i)) * Math.Max(1, e.Max)) : e.Flag == 0 ? 0 : e.Count / step;
             if ((_qty[i] / step) >= max) { GameAudio.Se(55); if (Buying && e.Flag != 0) _msg = 2; Refresh(); return; }
             _qty[i] += step;
         }
@@ -146,7 +174,7 @@ public partial class ShopTradeWindow : CgWindow
     /// <summary>卖：「全賣」——能卖的全部按整组选上 / 再按一次全部取消（官方 0x424a50）。</summary>
     public void ToggleAll()
     {
-        if (_page?.Shop is not { } list || Buying) return;
+        if (_page?.Shop is not { } list || Buying || Picking || Exchanging) return;
         _all = !_all;
         for (int i = 0; i < list.Count; i++) { var e = list[i]; int st = Math.Max(1, e.Stack); _qty[i] = _all && e.Flag != 0 ? e.Count / st * st : 0; }
         GameAudio.Se(51); Refresh();
@@ -156,10 +184,15 @@ public partial class ShopTradeWindow : CgWindow
     {
         if (Selected == 0) return;
         long total = Total();
-        if (Buying)
+        if (Exchanging)
+        {
+            if (CountOf(_page!.SourceItem) < total) { _msg = 1; GameAudio.Se(55); Refresh(); return; }
+            if (SlotsUsed() > FreeSlots()) { _msg = 2; GameAudio.Se(55); Refresh(); return; }
+        }
+        else if (Buying || Picking)
         {
             if (Gold() < total) { _msg = 1; GameAudio.Se(55); Refresh(); return; }
-            if (SlotsUsed() > FreeSlots()) { _msg = 2; GameAudio.Se(55); Refresh(); return; }
+            if (Buying && SlotsUsed() > FreeSlots()) { _msg = 2; GameAudio.Se(55); Refresh(); return; }
         }
         else if (Gold() + total > 10_000_000) { GameAudio.Se(55); return; }
         GameAudio.Se(78);
@@ -173,7 +206,9 @@ public partial class ShopTradeWindow : CgWindow
     {
         if (_page?.Shop is not { } list) return;
         GameAudio.Se(79);
-        string ans = Buying
+        string ans = Exchanging ? "swap:" + string.Join(",", list.Select((e, i) => (e, i)).Where(x => _qty[x.i] > 0).Select(x => $"{x.i}:{_qty[x.i]}"))
+            : Picking ? "pick:" + string.Join(",", list.Select((e, i) => (e, i)).Where(x => _qty[x.i] > 0).Select(x => x.e.Slot.ToString()))
+            : Buying
             ? "buy:" + string.Join(",", list.Select((e, i) => (e, i)).Where(x => _qty[x.i] > 0).Select(x => $"{x.i}:{_qty[x.i]}"))
             : "sell:" + string.Join(",", list.Select((e, i) => (e, i)).Where(x => _qty[x.i] > 0).Select(x => $"{x.e.Slot}:{_qty[x.i] / Math.Max(1, x.e.Stack)}"));
         Visible = false; _page = null; _confirm = false;
@@ -194,12 +229,14 @@ public partial class ShopTradeWindow : CgWindow
         {
             if (_qty[i] == 0) continue;
             int count = Buying ? _qty[i] : _qty[i] / Math.Max(1, e.Stack);
-            string name = Buying ? e.Name : $"{e.Name}({e.Stack}个)";
-            var t = new CgText { Wrap = 999, Text = $"{name}{new string(' ', Math.Max(0, 22 - name.Sum(CgText.Cells)))} × {count}", FontColor = Colors.White, Position = new Vector2(20 + 300 * (n % 2), 32 + 20 * (n / 2)) };
+            string name = Buying || Picking || Exchanging ? e.Name : $"{e.Name}({e.Stack}个)";
+            var t = new CgText { Wrap = 999, Text = Picking ? name : $"{name}{new string(' ', Math.Max(0, 22 - name.Sum(CgText.Cells)))} × {count}", FontColor = Colors.White, Position = new Vector2(20 + 300 * (n % 2), 32 + 20 * (n / 2)) };
             box.AddChild(t); n++;
         }
-        box.AddChild(new CgText { Wrap = 999, Text = $"持有金额 {Gold(),9} 金币    {(Buying ? "购买" : "卖出")}金额 {Total(),9} 金币", FontColor = Colors.White, Position = new Vector2(120, 257) });
-        box.AddChild(new CgText { Text = Buying ? "购买以上物品，可以吗？" : "卖出以上物品，可以吗？", FontColor = Colors.White, Position = new Vector2(215, 301) });
+        if (Exchanging)
+            box.AddChild(new CgText { Wrap = 999, Text = $"{_page.SourceName} {CountOf(_page.SourceItem),8} 个    交换个数 {Total(),8} 个", FontColor = Colors.White, Position = new Vector2(120, 257) });
+        else box.AddChild(new CgText { Wrap = 999, Text = $"持有金额 {Gold(),9} 金币    {(Picking ? (Judge ? "鉴定" : "修理") : Buying ? "购买" : "卖出")}金额 {Total(),9} 金币", FontColor = Colors.White, Position = new Vector2(120, 257) });
+        box.AddChild(new CgText { Text = $"{(Exchanging ? "交易" : Picking ? (Judge ? "鉴定" : "修理") : Buying ? "购买" : "卖出")}以上物品，可以吗？", FontColor = Colors.White, Position = new Vector2(215, 301) });
         foreach (var (label, x, act) in new (string, float, Action)[] { ("  是  ", 143, Yes), ("  否  ", 313, No) })
         {
             box.AddChild(new CgText { Text = label, FontColor = new Color(1, 1, 0.4f), Position = new Vector2(x, 341) });
