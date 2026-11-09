@@ -197,6 +197,17 @@ public partial class Main : Node2D
         _session.BattleStarted += v => { _trans?.Enter(); _pendingSteps.Clear(); _talkTarget = null; _battleUi.Show(v); _audio?.BattleStart(); _player.Visible = false; _hudSkin.SetBattle(true); };   // 官方战斗时主界面（状态面板、右上按钮）也隐藏   // 官方战斗时地图上的自己隐藏，只在战斗位置上显示
         _session.TurnResolved += (ev, v) => _battleUi.AppendLog(ev, v);
         _session.BattleEnded += o => { _battleUi.Close(o); _audio?.BattleEnd(); AutoSave(); };
+        _func = new FunctionPanel();
+        AddChild(_func);
+        _func.Chosen = code => (_session as NetworkSession)?.CustomFunction(code);
+        _result = new BattleResultWindow { Cache = _cache, Session = () => _session as NetworkSession };
+        AddChild(_result);
+        if (_session is NetworkSession nsR)
+        {
+            // 官方：战斗画面退出、回到地图后才出结果窗口
+            nsR.BattleResultReceived += r => { if (!_battleUi.Visible && !nsR.InBattle) _result.Show(r); else _resultPending = true; };
+            nsR.StatusChanged += () => _hudSkin?.SetBurst(nsR.BurstSeconds);
+        }
         _session.RewardsGained += OnRewards;
         _session.DialogChanged += p =>
         {
@@ -366,16 +377,20 @@ public partial class Main : Node2D
             SetState = (slot, st) => (_session as NetworkSession)?.SetPetState(slot, st),
             AddPoint = (slot, k) => (_session as NetworkSession)?.AddPetPoint(slot, k),
             Rename = (slot, n) => (_session as NetworkSession)?.RenamePet(slot, n),
-            BackToList = () => { _pets.Visible = true; _pets.Refresh(); },
+            BackToList = () => { _pets.Visible = true;
+        _petDetail.SwapTechs = (pet, a, b) => (_session as NetworkSession)?.SwapPetTechs(pet, a, b); _pets.Refresh(); },
         };
         AddChild(_petDetail);
         _pets.OpenDetail = slot => { _pets.Visible = false; _petDetail.Open(slot); };
+        _pets.Drop = slot => (_session as NetworkSession)?.DropPet(slot);
+        _pets.DropAsk = slot => { var p = _session.Player.Pets.FirstOrDefault(x => x.Slot == slot); if (p != null) _confirm.Ask($"要把「{p.DisplayName}」放在地上吗？", () => (_session as NetworkSession)?.DropPet(slot)); };
         _status = new StatusPanel { Cache = _cache, Player = () => _session.Player, AddPoint = k => (_session as NetworkSession)?.AddStatPoint(k), Session = () => _session as NetworkSession, Ask = (t, yes) => _confirm?.Ask(t, yes) };
         AddChild(_status);
         _mapWin = new MapPanel { Cache = _cache, Where = () => (_view?.Map, _session.X, _session.Y), MapName0 = () => _session.CurrentMap?.Name ?? "" };
         AddChild(_mapWin);
         _skills = new SkillPanel { Cache = _cache, Player = () => _session.Player };
         _skills.TechChosen = (sk, t) => _prod?.UseTech(sk, t);
+        _skills.Swap = (a, b) => (_session as NetworkSession)?.SwapSkills(a, b);
         AddChild(_skills);
         _system = new SystemPanel { Cache = _cache, Cfg = _cfg, Toast = t => _toast.Show(t, 2), DrawChanged = SpawnNpcs };
         _system.Chosen += k =>
@@ -521,6 +536,13 @@ public partial class Main : Node2D
         if (_view == null || _session is not NetworkSession ns) return;
         foreach (var g in ns.GroundItems)
         {
+            if (g.Pet)   // 扔在地上的宠物：画它的动画、头上名字
+            {
+                var ps = new AnimSprite { Cache = _cache, AnimeId = g.Image, Dir = ((g.Dir % 8) + 8) % 8, Act = _cfg.ActStand, FallbackAct = _cfg.ActStand, Position = Iso.ToScreen(g.X, g.Y) };
+                ps.AddChild(NameTag.Make(g.Name, NameTag.NpcColor, -92));
+                _view.Entities.AddChild(ps); _groundNodes.Add(ps);
+                continue;
+            }
             int img = g.Gold ? GoldImage(g.Count) : g.Image;
             if (_cache.ImageNo(img) is not (ImageTexture tex, var e) || e == null) continue;
             var node = new Sprite2D { Texture = tex, Centered = false, Position = Iso.ToScreen(g.X, g.Y), Offset = new Vector2(e.OffsetX, e.OffsetY) };
@@ -573,6 +595,11 @@ public partial class Main : Node2D
     private readonly Dictionary<int, (Node2D Node, Npc Npc)> _npcById = new();
     private StallWindow _stall = null!;
     private EmoteWindow? _emote;
+    private BattleResultWindow _result = null!;
+    private bool _resultPending;
+    private FunctionPanel _func = null!;
+    public FunctionPanel FuncUi => _func;
+    public BattleResultWindow ResultUi => _result;
     public EmoteWindow? EmoteUi => _emote;
     public AnimSprite? SpriteOf(int id) => _npcById.TryGetValue(id, out var e) ? e.Node as AnimSprite : null;
 
@@ -777,6 +804,7 @@ public partial class Main : Node2D
         if (!moving && _pendingSteps.Count == 0 && _talkTarget != null && !_session.InBattle) BeginTalk(_talkTarget);
         _player.Act = moving ? _cfg.ActWalk : _cfg.ActStand;
         if (!_player.Visible && !_battleUi.Visible) { _player.Visible = true; _hudSkin.SetBattle(false); }
+        if (_resultPending && !_battleUi.Visible && _session is NetworkSession nsr2 && nsr2.LastResult != null) { _resultPending = false; _result.Show(nsr2.LastResult); }
         var m = _session.CurrentMap; var p = _session.Player;
         _hud.Text = $"{(_cfg.UsingTestData ? "[测试素材] " : "")}{m?.Name} (#{m?.MapId})  ({_session.X},{_session.Y})    Lv{p.Level}  经验 {p.Exp}  金钱 {p.Gold}    FPS {Engine.GetFramesPerSecond()}\n" +
                     "点地面行走 · 点 NPC 对话 · 野外会遇敌 · 滚轮缩放 · 「动作」校准动作号";
@@ -787,6 +815,7 @@ public partial class Main : Node2D
     {
         bool c = (_mapWin?.Visible ?? false) || (_items?.Visible ?? false) || (_gold?.Visible ?? false) || (_emote?.Visible ?? false) || (_prod?.ItemSkill.Visible ?? false) || (_prod?.Materials.Visible ?? false);
         if (c != _rightCovered) { _rightCovered = c; _hudSkin?.SetRightCovered(c); }
+        if (_func != null) _func.Visible = !c && !_session.InBattle && _session is NetworkSession;
         bool l = (_status?.Visible ?? false) || (_skills?.Visible ?? false) || (_system?.Visible ?? false)
               || (_pets?.Visible ?? false) || (_petDetail?.Visible ?? false)
               || (_cardBook?.Visible ?? false) || (_album?.Visible ?? false) || (_prod?.AnyVisible ?? false) || (_mailEdit?.Visible ?? false) || (_mailRecord?.Visible ?? false);

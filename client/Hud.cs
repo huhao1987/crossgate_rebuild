@@ -45,6 +45,16 @@ public partial class Hud : CanvasLayer
     public void SetLeftCovered(bool covered) { _leftCov = covered; if (_battle) return; foreach (var c in _top) if (c.AnchorLeft == 0) c.Visible = !covered; }
     public void SetRightCovered(bool covered) { _rightCov = covered; if (_battle) return; foreach (var c in _top) if (c.AnchorLeft == 1) c.Visible = !covered; }
     private int _dialFrame = -1;
+    private Control? _burst; private CgText? _burstTime;
+    /// <summary>卡时（秒；小于 0 不显示）。</summary>
+    public void SetBurst(long seconds)
+    {
+        if (_burst == null || _burstTime == null) return;
+        if (seconds < 0) { _burst.Visible = false; return; }
+        _burstTime.Text = $"{seconds / 3600:00}:{seconds / 60 % 60:00}";
+        if (!_battle && !_leftCov) _burst.Visible = true;
+    }
+    public string BurstText => _burstTime?.Text ?? "";
 
     public override void _Ready()
     {
@@ -87,6 +97,13 @@ public partial class Hud : CanvasLayer
         }
         // 面板左边的圆盘是时间显示（官方是按时间画的天空渐变），图档来源还没找到，暂时留空
         panel.Position = Vector2.Zero; root.AddChild(panel); _top.Add(panel);
+        // 左上 "Burst: hh:mm"（服务端 MTg 给秒数，官方实测在状态面板下面 (1,65) 一条暗底）
+        _burst = new Control { Position = new Vector2(1, 65), Size = new Vector2(98, 22), MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        _burst.AddChild(new ColorRect { Color = new Color(0.12f, 0.11f, 0.06f, 0.75f), Size = _burst.Size, MouseFilter = Control.MouseFilterEnum.Ignore });
+        _burst.AddChild(new CgText { Text = "Burst:", FontColor = new Color(1f, 0.45f, 0.45f), Position = new Vector2(3, 3) });
+        _burstTime = new CgText { Text = "", FontColor = Colors.White, Position = new Vector2(54, 3) };
+        _burst.AddChild(_burstTime);
+        root.AddChild(_burst); _top.Add(_burst);
         // 左上 5 个开关 戰 聊 隊 名 易：开着时盖上亮字 22574–22578（官方：亮=开）。点一下切换（服务端 FS 开关位）。
         for (int i = 0; i < 5; i++)
         {

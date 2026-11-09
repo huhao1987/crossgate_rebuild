@@ -282,12 +282,44 @@ public sealed class NetworkSession : IGameSession
             case "hJq":   // TRLG：对方放上来的金币
                 if (Trade != null) { Trade.TheirGold = int.TryParse(f[0], out var tg) ? tg : 0; TradeChanged?.Invoke(); }
                 break;
+            case "RwK":   // TRLP：对方放上来的宠物
+                if (Trade != null && f.Length >= 2 && int.TryParse(f[0], out var tpi))
+                {
+                    var a = string.Join(' ', f.Skip(1)).Split('|');
+                    var tp = new PetInfo { Slot = tpi, Name = Unesc(a[0]), Level = Int(a, 1), Race = Int(a, 2), MaxHp = Int(a, 3), Hp = Int(a, 3), MaxMp = Int(a, 4), Mp = Int(a, 4),
+                        Vit = Int(a, 5), Str = Int(a, 6), Tgh = Int(a, 7), Spd = Int(a, 8), Mag = Int(a, 9), Loyalty = Int(a, 10), SkillSlots = Int(a, 11), Anime = Int(a, 13),
+                        Attack = Int(a, 14), Defense = Int(a, 15), Agility = Int(a, 16), Spirit = Int(a, 17), Recovery = Int(a, 18) };
+                    for (int e = 0; e < 4; e++) tp.Element[e] = Int(a, 19 + e);
+                    if (a.Length > 12 && a[12].Length > 0 && a[12] != a[0]) tp.Nick = tp.Name;
+                    Trade.TheirPets[tpi] = tp; TradeChanged?.Invoke();
+                }
+                break;
+            case "Yq":    // TRLPS：对方那只宠物的招式名
+                if (Trade != null && f.Length >= 2 && int.TryParse(f[0], out var tpk) && Trade.TheirPets.TryGetValue(tpk, out var tpp))
+                {
+                    tpp.Techs = string.Join(' ', f.Skip(1)).Split('|').Where(x => x.Trim().Length > 0).Select((n, k) => new TechInfo { Index = k, Name = Unesc(n) }).ToList();
+                    TradeChanged?.Invoke();
+                }
+                break;
+            case "xEg":   // TRCL：对方撤回了某件（道具 / 宠物）
+                if (Trade != null) { Trade.TheirItems.Clear(); Trade.TheirPets.Clear(); Trade.TheirGold = 0; Trade.TheyOpened = false; TradeChanged?.Invoke(); }
+                break;
             case "NdM":   // TROP：对方"开启"了（选好了）
                 if (Trade != null) { Trade.TheyOpened = true; TradeChanged?.Invoke(); }
                 break;
             case "We":    // TROC：0 中止、1 对方确认、2 完成
                 if (f[0] == "1") { if (Trade != null) { Trade.TheyConfirmed = true; TradeChanged?.Invoke(); } }
                 else { Trade = null; TradeChanged?.Invoke(); TradeEnded?.Invoke(f[0] == "2"); }
+                break;
+            case "Ov":    // POS：战斗位置 0 前排 1 后排
+                BackRow = f[0] == "1"; StatusChanged?.Invoke();
+                break;
+            case "Gn":    // RS：战斗结果（经验、掉落、技能经验）
+                OnBattleResult(rest.Trim());
+                break;
+            case "MTg":   // BT：左上 Burst 时间（秒，62 进制）、是否在走
+                BurstSeconds = D62Safe(f[0]); BurstRunning = f.Length > 1 && f[1] == "1"; BurstAt = DateTime.UtcNow;
+                StatusChanged?.Invoke();
                 break;
             case "Tmrx":  // 摆摊结果：0 成功
                 OnStallStarted(f[0]);
@@ -447,7 +479,12 @@ public sealed class NetworkSession : IGameSession
     // ———— 地上的东西（官方实测 2026-11-07）————
     // nsY 里 7 段的是地上的道具 "对象|x|y|图像|?|名字|数量"，4 段的是钱 "对象|x|y|金额"（钱少是几枚金币，多了是钱袋）。
     // uSB 对象 = 这个对象没了（被捡走、走出视野）。
-    public sealed record GroundItem(string Id, int X, int Y, int Image, string Name, int Count, bool Gold);
+    public sealed record GroundItem(string Id, int X, int Y, int Image, string Name, int Count, bool Gold) { public bool Pet { get; init; } public int Dir { get; init; } }
+    /// <summary>
+    /// 扔宠物（DP = FvWm x y 宠物栏，官方实测：宠物窗口里在宠物名字上点右键）→ 服务端 IsSy 栏 0（栏空了）+ nsY 3|id|x|y|朝向|形象|…|名字
+    /// （类型 3 = 地上的宠物，放在面前一格）+ "放下树精 (法兰城:242,101)"。捡：面向它 fIM x y 方向 → IsSy + uSB + "捡到了树精。"
+    /// </summary>
+    public void DropPet(int petSlot) => Send("FvWm", B62(X), B62(Y), B62(petSlot));
     private readonly Dictionary<string, GroundItem> _ground = new();
     public IReadOnlyCollection<GroundItem> GroundItems => _ground.Values;
     public event Action? GroundChanged;
@@ -468,6 +505,8 @@ public sealed class NetworkSession : IGameSession
     }
     /// <summary>这个服务端（致敬经典）的「整理」背包按钮：CUSTOMXB 0（官方 4.06 没有）。</summary>
     public void SortBag() => Send("CUSTOMXB", "0");
+    /// <summary>右上「功能」第 code 项（1 佣兵 2 银行 … 8 高速 … 23 佣兵血魔），这个服务端的扩展。</summary>
+    public void CustomFunction(int code) => Send("CUSTOMXB", code.ToString());
 
     private void OnObject(string s)
     {
@@ -484,6 +523,11 @@ public sealed class NetworkSession : IGameSession
         }
         if (p.Length < 9) return;
         int type = int.TryParse(p[0], out var t) ? t : 0;
+        if (type == 3 && int.TryParse(p[2], out var px) && int.TryParse(p[3], out var py))   // 地上的宠物
+        {
+            _ground[p[1]] = new GroundItem(p[1], px, py, int.TryParse(p[5], out var pa) ? pa : 0, Unesc(p[8]), 1, false) { Pet = true, Dir = int.TryParse(p[4], out var pd) ? pd : 0 };
+            GroundChanged?.Invoke(); return;
+        }
         var id = p[1];
         if (id == SelfId)
         {
@@ -530,6 +574,51 @@ public sealed class NetworkSession : IGameSession
                 else if (int.TryParse(p[3], out var act) && (act is >= 3 and <= 20 || act is 30 or 31)) ObjectActed?.Invoke(n.Id, act);
             }
         }
+    }
+
+    // ———————————————————— 战斗结果 / 卡时（官方 bob 实测 2026-11-09）————————————————————
+    // Gn -2|升级|经验,宠物栏|升级|经验,…(3 只),道具号\z名字|道具号\z名字|道具号\z名字|,技能0,…技能19
+    //   数字是 62 进制；技能段 "升级|经验" 或空（= +0）。窗口「戰鬥結果」23380 几秒后自己关。
+    // MTg 秒 0/1：左上 "Burst: hh:mm"（新号 W4 = 3600 = 01:00；bob 4UE = 18888 秒 = 05:14）。
+    public sealed record ResultRow(int PetSlot, bool LevelUp, long Exp);
+    public sealed record BattleResult(List<ResultRow> Rows, List<(int Id, string Name)> Items, Dictionary<int, (bool LevelUp, long Exp)> SkillExp);
+    public BattleResult? LastResult { get; private set; }
+    public event Action<BattleResult>? BattleResultReceived;
+    public long BurstSeconds { get; private set; } = -1;
+    /// <summary>平时设的战斗位置（状态窗口 戰鬥位置）：Ov 1 = 后排。</summary>
+    public bool BackRow { get; private set; }
+    /// <summary>POS = ih（不带参数也行，官方发 "ih "）：前排 ↔ 后排对调，服务端回 Ov。</summary>
+    public void ToggleBattleRow() => Send("ih", "");
+    /// <summary>SKSW = Noeb a b：技能列表里两个技能换位置（拖动，官方实测服务端回两条 cNE，改的是第 11 段顺序）。</summary>
+    public void SwapSkills(int a, int b) => Send("Noeb", a.ToString(), b.ToString());
+    /// <summary>PSSW = HJQp 宠物栏 a b：宠物的两招换位置（服务端回整条 OBee）。</summary>
+    public void SwapPetTechs(int pet, int a, int b) => Send("HJQp", pet.ToString(), a.ToString(), b.ToString());
+    public bool BurstRunning { get; private set; }
+    public DateTime BurstAt { get; private set; }
+
+    private void OnBattleResult(string s)
+    {
+        var seg = s.Split(',');
+        var rows = new List<ResultRow>(); var items = new List<(int, string)>(); var sk = new Dictionary<int, (bool, long)>();
+        for (int i = 0; i < seg.Length; i++)
+        {
+            var p = seg[i].Split('|');
+            if (i <= 3)
+            {
+                if (p.Length >= 3 && p[0].Length > 0) rows.Add(new ResultRow(p[0] == "-2" ? -1 : D62Safe(p[0]), p[1] == "1", D62Safe(p[2])));
+            }
+            else if (i == 4)
+            {
+                foreach (var it in p)
+                {
+                    var q = it.Split("\\z");
+                    if (q.Length >= 2 && int.TryParse(q[0], out var id)) items.Add((id, Unesc(q[1])));
+                }
+            }
+            else if (p.Length >= 2) sk[i - 5] = (p[0] == "1", D62Safe(p[1]));
+        }
+        LastResult = new BattleResult(rows, items, sk);
+        BattleResultReceived?.Invoke(LastResult);
     }
 
     // ———————————————————— 摆摊 ————————————————————
@@ -976,6 +1065,8 @@ public sealed class NetworkSession : IGameSession
         public string Partner = "";
         public List<ItemStack> TheirItems = new();
         public int TheirGold;
+        /// <summary>对方放上来的宠物（RwK 序号 名字|等级|种族|最大生命|最大魔力|体|力|强|速|魔|忠诚|技能栏|原名|形象|攻|防|敏|精|回|地|水|火|风，实测）+ Yq 序号 招式名…</summary>
+        public SortedDictionary<int, PetInfo> TheirPets = new();
         public bool TheyOpened, TheyConfirmed, IOpened, IConfirmed;
     }
     public TradeState? Trade { get; private set; }
@@ -1003,11 +1094,13 @@ public sealed class NetworkSession : IGameSession
         Trade = new TradeState { Partner = TradeCandidates[i] };
         TradeChanged?.Invoke();
     }
-    /// <summary>「開啓」：亮出自己要给的东西（背包格号、金币）。</summary>
-    public void OpenTrade(IEnumerable<int> slots, int gold)
+    /// <summary>
+    /// 「開啓」：亮出自己要给的东西。官方 exe 的格式（%d|%d 用 | 连起来）：道具 = "背包格|序号|背包格|序号…"，宠物 = "宠物栏|序号…"，序号从 0 数（实测 "aiAb  1|0 0" 给出 1 号栏宠物）。
+    /// </summary>
+    public void OpenTrade(IEnumerable<int> slots, int gold, IEnumerable<int>? pets = null)
     {
         if (Trade == null) return;
-        Send("aiAb", string.Join("|", slots.Select(x => $"{x}|0")), "", gold.ToString());
+        Send("aiAb", string.Join("|", slots.Select((x, k) => $"{x}|{k}")), string.Join("|", (pets ?? Array.Empty<int>()).Select((x, k) => $"{x}|{k}")), gold.ToString());
         Trade.IOpened = true; TradeChanged?.Invoke();
     }
     public void ConfirmTrade() { if (Trade == null) return; Send("OU", "1"); Trade.IConfirmed = true; TradeChanged?.Invoke(); }
@@ -1450,10 +1543,10 @@ public sealed class NetworkSession : IGameSession
             if (name.Length == 0) { if (old != null) Player.Skills.Remove(old); continue; }
             var sk = old ?? new SkillInfo { Slot = slot };
             sk.SkillId = Int(a, i + 1); sk.Name = name; sk.Level = Int(a, i + 3); sk.Exp = Int(a, i + 4); sk.NextExp = Int(a, i + 6);
-            sk.SlotsUsed = Math.Max(1, Int(a, i + 7)); sk.Type = Int(a, i + 8); sk.MaxLevel = Int(a, i + 5);
+            sk.SlotsUsed = Math.Max(1, Int(a, i + 7)); sk.Type = Int(a, i + 8); sk.MaxLevel = Int(a, i + 5); sk.Order = Int(a, i + 10);
             if (old == null) Player.Skills.Add(sk);
         }
-        Player.Skills.Sort((x, y) => x.Slot.CompareTo(y.Slot));
+        Player.Skills.Sort((x, y) => x.Order != y.Order ? x.Order.CompareTo(y.Order) : x.Slot.CompareTo(y.Slot));
     }
 
     /// <summary>

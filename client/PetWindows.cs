@@ -15,6 +15,9 @@ public partial class PetListWindow : CgWindow
     public Func<IReadOnlyList<PetInfo>> Pets = () => Array.Empty<PetInfo>();
     public Action<int, int>? SetState;   // 宠物栏、状态
     public Action<int>? OpenDetail;      // 宠物栏
+    /// <summary>扔宠物（官方：名字上点右键；手机：按住 0.6 秒，先问一下）。</summary>
+    public Action<int>? Drop;
+    public Action<int>? DropAsk;
 
     public override void _Ready() { Layer = 16; Visible = false; Build(Vector2.Zero, false); }
 
@@ -42,7 +45,14 @@ public partial class PetListWindow : CgWindow
             int slot = p.Slot, st = p.State;
             if (st == PetInfo.Walk) Img(StateButton(st), 198, 62 + dy);   // 郵件（散步）状态只能在详情里用「展示」改
             else Btn(StateButton(st), StateButton(st) + 1, 198, 62 + dy, () => SetState?.Invoke(slot, NextState(st)));
-            Hit(10, 36 + dy, 150, 24, _ => OpenDetail?.Invoke(slot));
+            var h = Hit(10, 36 + dy, 150, 24, mb => { if (mb.ButtonIndex == MouseButton.Right) Drop?.Invoke(slot); else if (mb.ButtonIndex == MouseButton.Left) _pressAt = Time.GetTicksMsec(); });
+            h.GuiInput += e =>
+            {
+                if (e is not InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false }) return;
+                if (_pressAt == 0) return;
+                bool longPress = Time.GetTicksMsec() - _pressAt > 600; _pressAt = 0;
+                if (longPress) DropAsk?.Invoke(slot); else OpenDetail?.Invoke(slot);
+            };
         }
         Btn(22509, 22510, 246, 6, () => Visible = false);
     }
@@ -53,6 +63,7 @@ public partial class PetListWindow : CgWindow
         Body.AddChild(new ColorRect { Color = c, Position = new Vector2(x, y), Size = new Vector2(42 * Math.Clamp(frac, 0, 1), 3), MouseFilter = Control.MouseFilterEnum.Ignore });
     }
 
+    private ulong _pressAt;
     public void TestClickState(int slot) { var p = Pets().FirstOrDefault(x => x.Slot == slot); if (p != null) SetState?.Invoke(slot, NextState(p.State)); }
 }
 
@@ -197,8 +208,18 @@ public partial class PetDetailWindow : CgWindow
             if (t == null) continue;
             Txt(t.Name, 40, 42 + 25 * i);
             Txt(t.Mp.ToString(), 252, 42 + 25 * i, right: true);
+            // 拖一招到另一行 = 换位置（HJQp 宠物栏 a b）
+            int from = i, slot = p.Slot;
+            var h = Hit(10, 36 + 25 * i, 250, 22, _ => { }, box: false);
+            h.GuiInput += e =>
+            {
+                if (e is not InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false } mb) return;
+                int to = from + (int)MathF.Floor(mb.Position.Y / 25f);
+                if (to != from && to >= 0 && to < 10) SwapTechs?.Invoke(slot, from, to);
+            };
         }
     }
+    public Action<int, int, int>? SwapTechs;
 
     private static readonly (string Label, float X, float Y)[] EquipBoxes =
         { ("项圈", 29, 53), ("饰品", 29, 126), ("防具", 29, 200), ("饰品", 197, 126), ("水晶", 197, 200) };

@@ -160,7 +160,12 @@ public partial class NetE2E : SceneTree
                 if (_frame > 60 * 120) { Check(false, "战斗 2 分钟内没结束"); _stage = 9; }
                 break;
             case 7 when _frame == 30:
+            {
+                var ns = (NetworkSession)_main.Session;
+                Check(_outcome == CgPort.Server.BattleOutcome.Lose || _main.ResultUi.Visible && ns.LastResult != null, $"战斗结果窗口：{_main.ResultUi.Text}（{_outcome}）");
+                Check(_main.HudSkin.BurstText.Length == 5, $"左上 Burst {_main.HudSkin.BurstText}（{ns.BurstSeconds} 秒）");
                 Shot("after"); _stage = 9; break;
+            }
             case 9:
                 GD.Print($"NETE2E DONE pass={_results.Count(r => r.StartsWith("PASS"))} fail={_results.Count(r => r.StartsWith("FAIL"))}");
                 File.Delete(ProjectSettings.GlobalizePath("user://config.json"));

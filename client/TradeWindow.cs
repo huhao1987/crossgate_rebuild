@@ -64,12 +64,14 @@ public partial class TradeWindow : CgWindow
     public Func<NetworkSession?> Session = () => null;
     private int _theirTab, _myTab;
     private readonly SortedSet<int> _picked = new();
+    private readonly SortedSet<int> _pickedPets = new();
+    public IReadOnlyCollection<int> PickedPets => _pickedPets;
     private string _goldInput = "";
     private long _lastClick; private int _lastSlot = -1;
 
     public override void _Ready() { Layer = 20; Visible = false; Build(new Vector2(200, 148), false); }
 
-    public void Open() { _picked.Clear(); _goldInput = ""; _theirTab = 0; _myTab = 0; Visible = true; Refresh(); }
+    public void Open() { _picked.Clear(); _pickedPets.Clear(); _goldInput = ""; _theirTab = 0; _myTab = 0; Visible = true; Refresh(); }
 
     public IReadOnlyCollection<int> Picked => _picked;
     public int GoldInput => int.TryParse(_goldInput, out var g) ? g : 0;
@@ -85,8 +87,8 @@ public partial class TradeWindow : CgWindow
         Txt(t.Partner, 130, 12, center: true);
         Txt(s!.Player.Name, 432, 12, center: true);
         // 计数：个（道具件数）、只（宠物）、G
-        Counter(t.TheirItems.Count, "个", 50); Counter(0, "只", 140); Counter(t.TheirGold, "G", 230);
-        Counter(_picked.Count, "个", 329); Counter(0, "只", 419); Counter(GoldInput, "G", 509);
+        Counter(t.TheirItems.Count, "个", 50); Counter(t.TheirPets.Count, "只", 140); Counter(t.TheirGold, "G", 230);
+        Counter(_picked.Count, "个", 329); Counter(_pickedPets.Count, "只", 419); Counter(GoldInput, "G", 509);
         // 对方
         switch (_theirTab)
         {
@@ -94,7 +96,11 @@ public partial class TradeWindow : CgWindow
                 Img(23231, 4, 58);
                 foreach (var it in t.TheirItems) if (it.Slot is >= 0 and < 20) Icon(it, SlotPos(4, it.Slot));
                 break;
-            case 1: Img(23233, 4, 58); break;
+            case 1:   // 寵物：5 行（横线 y = 140+22k，名字在线上方居中，同银行），对方放上来的宠物（名字 + 等级）
+                Img(23233, 4, 58);
+                int row = 0;
+                foreach (var tp in t.TheirPets.Values) { if (row >= 5) break; Txt($"{tp.DisplayName} Lv{tp.Level}", 147, 128 + 22 * row++, center: true); }
+                break;
             case 2: Img(23234, 4, 58); Txt(t.TheirGold.ToString(), 248, 102, right: true); break;
         }
         for (int i = 0; i < 3; i++) { int k = i; Hit(8 + 88 * i, 60, 84, 20, _ => { _theirTab = k; Refresh(); }, box: false); }
@@ -114,7 +120,18 @@ public partial class TradeWindow : CgWindow
                 if (!t.IOpened)
                     for (int c = 0; c < 20; c++) { int slot = c + 8; var p = SlotPos(283, c); Hit(p.X, p.Y, 48, 48, _ => ClickSlot(slot)); }
                 break;
-            case 1: Img(23243, 283, 58); break;
+            case 1:   // 自己的宠物：双击选上（黄字）/ 取消
+                Img(23243, 283, 58);
+                for (int k = 0; k < 5; k++)
+                {
+                    var mp = s.Player.Pets.FirstOrDefault(x => x.Slot == k);
+                    float line = 140 + 22 * k;
+                    if (mp == null) continue;
+                    Txt($"{mp.DisplayName} Lv{mp.Level}", 425, line - 12, _pickedPets.Contains(k) ? new Color(1, 1, 0) : Colors.White, center: true);
+                    int kk = k;
+                    if (!t.IOpened) Hit(342, line - 20, 166, 20, _ => ClickPet(kk));
+                }
+                break;
             case 2:
                 Img(23244, 283, 58);
                 Txt(s.Player.Gold.ToString(), 493, 125, right: true);
@@ -161,6 +178,17 @@ public partial class TradeWindow : CgWindow
         Refresh();
     }
 
+    private long _petClick; private int _petLast = -1;
+    private void ClickPet(int slot)
+    {
+        long now = (long)Time.GetTicksMsec();
+        bool dbl = slot == _petLast && now - _petClick < 500;
+        _petClick = now; _petLast = slot;
+        if (!dbl) return;
+        if (!_pickedPets.Remove(slot)) _pickedPets.Add(slot);
+        Refresh();
+    }
+
     private void Keypad()
     {
         for (int d = 0; d <= 9; d++)
@@ -178,11 +206,12 @@ public partial class TradeWindow : CgWindow
     {
         var s = Session(); if (s?.Trade == null) return;
         int gold = (int)Math.Min(GoldInput, s.Player.Gold);
-        s.OpenTrade(_picked, gold);
+        s.OpenTrade(_picked, gold, _pickedPets);
     }
     public void DoConfirm() => Session()?.ConfirmTrade();
 
     // 测试用
+    public void TestPickPet(int slot) { if (!_pickedPets.Remove(slot)) _pickedPets.Add(slot); Refresh(); }
     public void TestPick(int slot) { if (!_picked.Remove(slot)) _picked.Add(slot); Refresh(); }
     public void TestGold(int g) { _goldInput = g.ToString(); Refresh(); }
     public void TestTab(bool mine, int tab) { if (mine) _myTab = tab; else _theirTab = tab; Refresh(); }

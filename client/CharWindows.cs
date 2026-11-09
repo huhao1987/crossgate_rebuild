@@ -92,6 +92,14 @@ public partial class StatusPanel : CgWindow
     public void TestPlus(int i) => Body.GetChildren().OfType<TextureButton>().Where(b => b.Position.X == 225).ElementAtOrDefault(i)?.EmitSignal(BaseButton.SignalName.Pressed);
     public int Tab => _tab;
 
+    private void RowButton(string text, float x, bool on, Action a)
+    {
+        Body.AddChild(new ColorRect { Color = on ? Color.Color8(250, 210, 120) : Color.Color8(120, 70, 40), Position = new Vector2(x, 377), Size = new Vector2(38, 21), MouseFilter = Control.MouseFilterEnum.Ignore });
+        Body.AddChild(new ColorRect { Color = Color.Color8(190, 120, 70), Position = new Vector2(x + 2, 379), Size = new Vector2(34, 17), MouseFilter = Control.MouseFilterEnum.Ignore });
+        Txt(text, x + 19, 384, Color.Color8(255, 190, 200), center: true);
+        Hit(x, 377, 38, 21, _ => a());
+    }
+
     public override void Refresh()
     {
         if (!Visible) return;
@@ -123,6 +131,12 @@ public partial class StatusPanel : CgWindow
             Color[] col = { new(0, 0.8f, 0), new(0.2f, 0.4f, 1), new(1, 0, 0), new(1, 1, 0) };
             for (int e = 0; e < 4; e++)
                 if (s.Element[e] > 0) Body.AddChild(new ColorRect { Color = col[e], Position = new Vector2(185, 216 + 20 * e), Size = new Vector2(70 * Math.Min(100, s.Element[e]) / 100f, 8), MouseFilter = Control.MouseFilterEnum.Ignore });
+            // 戰鬥位置 前排 / 後排（官方实测：点另一个 = ih，服务端回 Ov 0 前排 / 1 后排；按钮图档里没有，照截图画）
+            if (Session() is { } nsr)
+            {
+                RowButton("前排", 150, !nsr.BackRow, () => { if (nsr.BackRow) nsr.ToggleBattleRow(); });
+                RowButton("後排", 190, nsr.BackRow, () => { if (!nsr.BackRow) nsr.ToggleBattleRow(); });
+            }
         }
         else if (_tab == 1)
         {
@@ -501,6 +515,8 @@ public partial class SkillPanel : CgWindow
     }
 
     public void ShowDetail(int i) { _detail = i; Visible = true; Refresh(); }
+    /// <summary>拖技能换位置：两个技能栏号。</summary>
+    public Action<int, int>? Swap;
     public int Detail => _detail;
 
     public override void Refresh()
@@ -522,7 +538,16 @@ public partial class SkillPanel : CgWindow
                 Txt(k.Name, 36, y + 6);
                 Txt(k.Level.ToString(), 218, y + 5, right: true);
                 Txt(k.SlotsUsed.ToString(), 252, y + 5, right: true);
-                Hit(6, y, 256, 20, _ => { _detail = idx; Refresh(); });
+                // 官方：按住一个技能拖到另一个上 = 换位置（Noeb a b）；只点一下 = 详情
+                var h = Hit(6, y, 256, 20, _ => { });
+                var kk = k;
+                h.GuiInput += e =>
+                {
+                    if (e is not InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: false } mb) return;
+                    int to = idx + (int)MathF.Floor(mb.Position.Y / 28f);
+                    if (to != idx && to >= 0 && to < skills.Count && Swap != null) Swap(kk.Slot, skills[to].Slot);
+                    else { _detail = idx; Refresh(); }
+                };
             }
         }
         else
