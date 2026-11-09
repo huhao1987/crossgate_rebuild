@@ -974,7 +974,8 @@ public partial class BattleUi : CanvasLayer
     /// <summary>
     /// 官方客户端（cg4.06cn.exe 0x49a838）里的攻击魔法特效表：每种属性一行 4 个动画，按魔法等级分档
     /// （0x487a78：LV1–3 第 0 档、4–6 第 1 档、7–9 第 2 档、10 第 3 档，越高越大）。
-    /// 行：0 地（陨石）、1 水（冰柱）、2 火、3 风（龙卷）。
+    /// 行：0 地（陨石）、1 水（冰柱）、2 火、3 风（龙卷）、4 补血、5 恢复（表里第 4、5 行的动画按画面认的：都是回复用的螺旋光圈，第 4 行带绿光点）。
+    /// 表里还有第 6 行（又一组风）、第 7 行 114177（会算朝向目标的方向，像是飞行物），对应哪种技能还没确定。
     /// </summary>
     private static readonly int[,] MagicFx =
     {
@@ -982,6 +983,8 @@ public partial class BattleUi : CanvasLayer
         { 110029, 110026, 110023, 110020 },
         { 110149, 110146, 110143, 110140 },
         { 110047, 110046, 110045, 110044 },
+        { 110066, 110065, 110064, 110063 },   // 第 4 行：回复（绿光点 + 螺旋光圈）——补血 / 强力补血 / 超强补血（技能 61–63）
+        { 110070, 110069, 110068, 110067 },   // 第 5 行：同样的光圈不带光点——恢复 / 强力恢复 / 超强恢复（技能 64–66）
     };
     private static readonly byte[] LevelBucket = { 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3 };
 
@@ -992,9 +995,10 @@ public partial class BattleUi : CanvasLayer
     public static int? MagicEffect(int techId)
     {
         int skill = techId / 100, n = techId % 100;
-        if (skill < 19 || skill > 30) return null;
+        int row = skill is >= 19 and <= 30 ? (skill - 19) % 4 : skill is >= 61 and <= 63 ? 4 : skill is >= 64 and <= 66 ? 5 : -1;
+        if (row < 0) return null;
         int lv = n >= 16 ? n - 15 : n + 1;
-        return MagicFx[(skill - 19) % 4, LevelBucket[Math.Clamp(lv, 0, LevelBucket.Length - 1)]];
+        return MagicFx[row, LevelBucket[Math.Clamp(lv, 0, LevelBucket.Length - 1)]];
     }
 
     public int EffectsPlayed { get; private set; }

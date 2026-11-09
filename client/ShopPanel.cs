@@ -160,7 +160,7 @@ public partial class ShopMenuWindow : CgWindow
 
     public void ShowPage(DialogPage? p)
     {
-        _page = p?.Kind is "shop" or "skillmenu" or "trademenu" ? p : null;
+        _page = p?.Kind is "shop" or "skillmenu" or "trademenu" or "givemenu" ? p : null;
         Visible = _page != null;
         if (Visible) Refresh();
     }
@@ -185,6 +185,7 @@ public partial class ShopMenuWindow : CgWindow
         {
             "skillmenu" => (new[] { " 想学习技能 ", " 想忘记技能 ", "  还是算了 " }, 150f, 157f),
             "trademenu" => (new[] { "想 交 易", " 没  事 " }, 170f, 177f),
+            "givemenu" => (new[] { " 交出物品 ", "  取  消  " }, 170f, 177f),   // BZ 30，exe 0x42a7d0
             _ => (new[] { " 想  买 ", " 想  卖 ", "不 必 了" }, 170f, 157f),
         };
         var opts = p.Options ?? new List<string>();
@@ -203,7 +204,7 @@ public partial class ShopMenuWindow : CgWindow
     public void Pick(int i)
     {
         // 最后一项（不必了 / 还是算了）音效 57；交易入口两项都是 79（exe 0x428eb4）
-        GameAudio.Se(_page?.Kind != "trademenu" && i == (_page?.Kind == "trademenu" ? 1 : 2) ? 57 : 79);
+        GameAudio.Se(_page?.Kind is not ("trademenu" or "givemenu") && i == 2 ? 57 : 79);
         Visible = false;
         Choose?.Invoke(i);
     }

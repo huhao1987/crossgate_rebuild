@@ -164,6 +164,8 @@ public partial class Main : Node2D
     private BoardWindow _board = null!;
     private PetSkillShopWindow _petShop = null!;
     private BuryWindow _bury = null!;
+    public BuryWindow Bury => _bury;
+    public DialogPanel DialogUi => _dialog;
     private HintBar _hint = null!;
     public HintBar Hint => _hint;
     public PetSkillShopWindow PetShop => _petShop;
@@ -315,7 +317,7 @@ public partial class Main : Node2D
         _session.RewardsGained += OnRewards;
         _session.DialogChanged += p =>
         {
-            bool heal = p?.Kind == "heal", board = p?.Kind == "board", petShop = p?.Kind is "petskill" or "petpick" or "petslot", bury = p?.Kind == "bury", shop = p?.Shop != null && !heal && !board && !petShop, menu = p?.Kind is "shop" or "skillmenu" or "trademenu";
+            bool heal = p?.Kind == "heal", board = p?.Kind == "board", petShop = p?.Kind is "petskill" or "petpick" or "petslot", bury = p?.Kind == "bury", shop = p?.Shop != null && !heal && !board && !petShop, menu = p?.Kind is "shop" or "skillmenu" or "trademenu" or "givemenu";
             _shop.ShowPage(shop ? p : null);
             _heal.ShowPage(heal ? p : null);
             _board.ShowPage(board ? p : null);
@@ -554,7 +556,7 @@ public partial class Main : Node2D
         _petShop = new PetSkillShopWindow { Cache = _cache, StandAct = _cfg.ActStand, Gold = () => _session.Player.Gold, HasPet = () => _session.Player.Pets.Count > 0 };
         _petShop.Submit = a => { if (a == "cancel") (_session as NetworkSession)?.WindowClose(); else _session.Answer("data:" + a); };
         AddChild(_petShop);
-        _bury = new BuryWindow { Cache = _cache, Items = () => _session.Player.Items, Submit = a => _session.Answer("data:" + a) };
+        _bury = new BuryWindow { Cache = _cache, Items = () => _session.Player.Items, Submit = a => { if (a == "cancel") (_session as NetworkSession)?.WindowClose(); else _session.Answer("data:" + a); } };
         AddChild(_bury);
         _hint = new HintBar(); AddChild(_hint);
         AddChild(_shop);

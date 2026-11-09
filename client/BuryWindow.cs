@@ -30,6 +30,7 @@ public partial class BuryWindow : CgWindow
         Clear();
         if (Page == null) return;
         Img(23358, 0, 0, block: true);
+        Btn(22509, 22510, 252, 6, Close);   // 官方这个窗口没有关闭钮（不知道怎么退出），移植加一个 ×
         var items = Items();
         for (int slot = 8; slot < 28; slot++)
         {
@@ -46,6 +47,8 @@ public partial class BuryWindow : CgWindow
             hit.TooltipText = ok ? "埋起此物品。" : "这个物品无法埋起来。";
         }
     }
+
+    public void Close() { GameAudio.Se(57); Visible = false; Page = null; Submit?.Invoke("cancel"); }
 
     public void Pick(int slot)
     {

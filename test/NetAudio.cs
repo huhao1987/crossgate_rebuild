@@ -56,10 +56,12 @@ public partial class NetAudio : SceneTree
                 b.TestPressAttack(); _st = 50; _f = 0; break;
             case 50 when _f == 10:
                 b.TestPickTarget(s!.CurrentBattle.Units.First(u => u.Side == 1 && u.Alive).Id); _st = 6; _f = 0; break;
-            case 6 when s!.PetTurn && b.PetPhaseShown && _f > 10 && _f < 12:
+            // 宠物也要下指令（宠物在战斗栏时）：每 40 帧点一次宠物第 0 招 + 选敌人，直到动画播出来
+            case 6 when s!.PetTurn && !b.Busy && _f % 40 == 11 && b.AttackAnimsShown == 0:
                 b.TestClickSub(0); break;
-            case 6 when s!.PetTurn && _f == 22:
-                b.TestPickTarget(s.CurrentBattle.Units.First(u => u.Side == 1 && u.Alive).Id); break;
+            case 6 when s!.PetTurn && !b.Busy && _f % 40 == 22 && b.AttackAnimsShown == 0:
+                { var en = s.CurrentBattle.Units.FirstOrDefault(u => u.Side == 1 && u.Alive); if (en != null) b.TestPickTarget(en.Id); }
+                break;
             case 6 when b.AttackAnimsShown > 0 && _f > 200 || _f == 1500:
                 Check(a!.PlayedSe.Count > 0, $"（事件 {b.PlayedEvents}，攻击动作 {b.AttackAnimsShown}）攻击动画放了音效：{string.Join(",", a.PlayedSe.Distinct())}（文件 {string.Join(",", a.PlayedSe.Distinct().Select(i => SeTable.All.GetValueOrDefault(i).File))}）");
                 _st = 7; _f = 0; break;

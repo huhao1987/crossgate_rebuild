@@ -2139,6 +2139,16 @@ public sealed class NetworkSession : IGameSession
         int? header = null;
         if (bar >= 0 && int.TryParse(data[..bar].Replace("\\S", "").Trim(), out var h)) { header = h; data = data[(bar + 1)..]; }
         DialogPage page;
+        if (type == 30)
+        {
+            // 交出物品（exe 0x420dcf 读、0x42a7d0 画）：头像|NPC名|?|话，选项「 交出物品 」「  取  消  」，同交易入口：交出发 "0"，取消只关
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n").Trim('\n') : "";
+            page = new DialogPage(T(3), new List<string>(), false, new List<string> { "交出物品", "取消" })
+            { Kind = "givemenu", NpcName = T(1), Face = int.TryParse(q[0], out var fc) ? fc : 0 };
+            DialogChanged?.Invoke(page);
+            return;
+        }
         if (type == 27)
         {
             // 交易入口（Brushman 等，exe 0x41fa41 读、0x428d82 画）：头像|NPC名|话|，选项固定「想 交 易」「 没  事 」
@@ -2303,7 +2313,7 @@ public sealed class NetworkSession : IGameSession
             int n = int.Parse(button[4..]) + 1;
             if (w.Type == 5 && n == 3) { DialogChanged?.Invoke(null); return; }
             if (w.Type == 16 && n == 3) { DialogChanged?.Invoke(null); return; }   // 还是算了
-            if (w.Type == 27) { if (n == 2) { DialogChanged?.Invoke(null); return; } n = 0; }   // 交易入口：想交易发 "0"（exe 0x428e78 发的是选项序号 0），没事只关窗口
+            if (w.Type is 27 or 30) { if (n == 2) { DialogChanged?.Invoke(null); return; } n = 0; }   // 交易入口：想交易发 "0"（exe 0x428e78 发的是选项序号 0），没事只关窗口
             sel = n.ToString();
         }
         else if (button.StartsWith("buy:") || button.StartsWith("sell:"))
