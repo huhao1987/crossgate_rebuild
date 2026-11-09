@@ -244,7 +244,7 @@ public partial class ChatLog : CanvasLayer
         foreach (var ch in _root.GetChildren()) ch.QueueFree();
         for (int i = 0; i < _lines.Count; i++)
         {
-            var t = new CgText { Wrap = 999, FontColor = _lines[i].Color, Position = new Vector2(Left, LastTop - (_lines.Count - 1 - i) * Line) };
+            var t = new CgText { Wrap = 999, Emoji = true, FontColor = _lines[i].Color, Position = new Vector2(Left, LastTop - (_lines.Count - 1 - i) * Line) };
             t.Text = _lines[i].Text;
             _root.AddChild(t);
         }

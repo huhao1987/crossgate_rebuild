@@ -49,6 +49,21 @@ public abstract partial class CgWindow : CanvasLayer
         b.Pressed += onClick; Body.AddChild(b); return b;
     }
 
+    /// <summary>直接给纹理（exe 资源里的图）。</summary>
+    protected TextureRect? ImgTex(Texture2D? t, float x, float y, bool block = false, Vector2? size = null)
+    {
+        if (t == null) return null;
+        var r = new TextureRect { Texture = t, Position = new Vector2(x, y), MouseFilter = block ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore };
+        if (size is { } sz) { r.ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize; r.StretchMode = TextureRect.StretchModeEnum.Scale; r.Size = sz; }
+        Body.AddChild(r); return r;
+    }
+    protected TextureButton? BtnTex(Texture2D? t, Texture2D? hover, float x, float y, Action onClick)
+    {
+        if (t == null) return null;
+        var b = new TextureButton { TextureNormal = t, TextureHover = hover ?? t, TexturePressed = hover ?? t, Position = new Vector2(x, y) };
+        b.Pressed += onClick; Body.AddChild(b); return b;
+    }
+
     protected Control Hit(float x, float y, float w, float h, Action<InputEventMouseButton> onClick, bool box = true)
     {
         var c = new Control { Position = new Vector2(x, y), Size = new Vector2(w, h), MouseFilter = Control.MouseFilterEnum.Stop };
@@ -587,6 +602,15 @@ public partial class MapPanel : CgWindow
 {
     public Func<(MapData? Map, int X, int Y)> Where = () => (null, 0, 0);
     public Func<string> MapName0 = () => "";
+    public Action? OpenAutoPath, OpenBigMap;
+    /// <summary>这一格算不算"知道"：走过（周围 Radius 格）或服务端补过（第三层带 0x8000，官方缓存的标志）。</summary>
+    public bool IsExplored(MapData map, int x, int y)
+    {
+        if (!map.InBounds(x, y)) return false;
+        int i = map.Index(x, y);
+        if (map.Events.Length > i && (map.Events[i] & 0x8000) != 0) return true;
+        return _explored.TryGetValue(map.Id, out var e) && e[i];
+    }
     private string MapName(MapData m) { var n = MapName0(); return (n.Length > 0 ? n : m.Name).Split('|')[0]; }
     private ImageTexture? _mini; private int _miniMap = -1, _miniVer = -1;
     private readonly Dictionary<int, bool[]> _explored = new();
@@ -655,7 +679,7 @@ public partial class MapPanel : CgWindow
                 int tx = cx + (int)MathF.Round((sx - sy) / 2), ty = cy + (int)MathF.Round((sx + sy) / 2);
                 if (tx < 0 || ty < 0 || tx >= map.Width || ty >= map.Height) { img.SetPixel(px, py, Colors.Black); continue; }
                 int i = ty * map.Width + tx;
-                if (!ShowAll && (e == null || !e[i])) { img.SetPixel(px, py, Colors.Black); continue; }
+                if (!ShowAll && (e == null || !e[i]) && !(map.Events.Length > i && (map.Events[i] & 0x8000) != 0)) { img.SetPixel(px, py, Colors.Black); continue; }
                 img.SetPixel(px, py, TileColor(map.Ground[i]));   // 官方只画地面（建筑不画）
             }
         return ImageTexture.CreateFromImage(img);
@@ -670,6 +694,9 @@ public partial class MapPanel : CgWindow
         var (map, px, py) = Where();
         Img(22535, 0, 0, block: true);
         Btn(22509, 22510, 222, 6, () => Visible = false);
+        // 标题栏两个蓝球（exe BMP 209，悬停 210）：左 自動尋路列表、右 全屏大地图
+        BtnTex(ExeArt.Bmp(209), ExeArt.Bmp(210), 173, 6, () => OpenAutoPath?.Invoke());
+        BtnTex(ExeArt.Bmp(209), ExeArt.Bmp(210), 198, 6, () => OpenBigMap?.Invoke());
         if (map == null) return;
         Txt(MapName(map), 122, 43, center: true);
         Txt("东", 66, 193, Colors.Black); Txt(px.ToString(), 91, 193);

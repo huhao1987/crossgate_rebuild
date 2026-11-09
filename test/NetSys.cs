@@ -43,7 +43,7 @@ public partial class NetSys : SceneTree
             case 2 when _f == 60:
                 var log = string.Join("\n", Directory.GetFiles("/home/claude/wine/cgmsv/log", "packet_*.txt").OrderBy(x => x).TakeLast(1).SelectMany(File.ReadLines).Where(l => l.Contains("\ttest1\t") && string.CompareOrdinal(l[..8], _since) >= 0));
                 Check(log.Contains("[Recv]") && log.Split('\n').Any(l => l.Contains("[Recv]") && l.TrimEnd().EndsWith("WA")), "服务端收到登出 WA");
-                Check(!s!.InGame && _m.GetChildren().OfType<SetupScreen>().Any(), "回到设置界面");
+                Check(!s!.InGame && _m.GetChildren().OfType<SetupScreen>().Any(), $"回到设置界面 InGame={s.InGame} setup={_m.GetChildren().OfType<SetupScreen>().Count()}");
                 GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true;
         }
         return _f > 3000;

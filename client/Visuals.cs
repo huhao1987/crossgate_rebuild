@@ -270,6 +270,9 @@ public partial class CgText : Control
     public CgText() { MouseFilter = MouseFilterEnum.Ignore; }
 
     public static int Cells(char c) => c < 0x80 ? 1 : 2;
+    /// <summary>画 "%字母" 聊天表情（聊天栏才开）。</summary>
+    public bool Emoji;
+    public static int? EmojiIndex(char c) => c is >= 'A' and <= 'Z' ? c - 'A' : c is >= 'a' and <= 'z' ? c - 'a' + 26 : null;
 
     /// <summary>按 \n 分行，再按格数自动换行（全角字不拆开）。</summary>
     public static List<string> Layout(string text, int wrap)
@@ -295,8 +298,17 @@ public partial class CgText : Control
         for (int l = 0; l < _lines.Count; l++)
         {
             float x = 0, y = l * LineHeight + 13;
-            foreach (var ch in _lines[l])
+            var line = _lines[l];
+            for (int k = 0; k < line.Length; k++)
             {
+                char ch = line[k];
+                // 聊天表情（exe 0x411539）："%" + 字母 → 第几个表情（A–Z = 0–25，a–z = 26–51，超过张数原样显示），
+                // 图是 exe PNG 103（18×18 一格、10 列），按字高缩小画在这两个字节的位置
+                if (Emoji && ch == '%' && k + 1 < line.Length && EmojiIndex(line[k + 1]) is int ei && ExeArt.Png(103) is { } sheet && ei < sheet.GetWidth() / 18 * (sheet.GetHeight() / 18))
+                {
+                    DrawTextureRectRegion(sheet, new Rect2(x + 1, y - 12, 15, 15), new Rect2(ei % (sheet.GetWidth() / 18) * 18, ei / (sheet.GetWidth() / 18) * 18, 18, 18));
+                    x += 2 * CellW; k++; continue;
+                }
                 if (ch != ' ' && ch != '　')
                 {
                     var s = ch.ToString();
@@ -308,5 +320,46 @@ public partial class CgText : Control
                 x += Cells(ch) * CellW;
             }
         }
+    }
+}
+
+/// <summary>官方客户端 exe 里的界面图 / 文本（见 PeResources）。游戏目录里找带 RCDATA 208 的 exe；没有就全部返回 null（界面退化）。</summary>
+public static class ExeArt
+{
+    private static CgPort.Core.Assets.PeResources? _res;
+    private static string? _root;
+    private static readonly Dictionary<string, ImageTexture?> _tex = new();
+
+    public static void Init(string gameRoot)
+    {
+        if (_root == gameRoot) return;
+        _root = gameRoot; _res = null; _tex.Clear();
+        try
+        {
+            foreach (var f in CgPort.Core.GameFiles.EnumerateFiles(gameRoot).Where(f => f.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)).OrderByDescending(f => f.Contains("cg", StringComparison.OrdinalIgnoreCase)))
+                if (CgPort.Core.Assets.PeResources.Load(f) is { } r && r.Get("10", 208) != null) { _res = r; break; }
+        }
+        catch { }
+    }
+    public static bool Ok => _res != null;
+
+    /// <summary>RCDATA 里的 PNG。</summary>
+    public static ImageTexture? Png(int id) => Get("p" + id, () =>
+    {
+        if (_res?.Get("10", id) is not { } b) return null;
+        var im = new Image(); return im.LoadPngFromBuffer(b) == Error.Ok ? im : null;
+    });
+
+    /// <summary>BITMAP 资源，黑色 (0,0,0) 当透明（官方实测）。</summary>
+    public static ImageTexture? Bmp(int id) => Get("b" + id, () =>
+        _res?.DecodeBmp(id) is var (w, h, rgba) ? Image.CreateFromData(w, h, false, Image.Format.Rgba8, rgba) : null);
+
+    public static string? Text(string type, int id) => _res?.Get(type, id) is { } b ? CgPort.Core.Text.Gbk.Decode(b) : null;
+
+    private static ImageTexture? Get(string key, Func<Image?> make)
+    {
+        if (_tex.TryGetValue(key, out var t)) return t;
+        var im = make();
+        return _tex[key] = im == null ? null : ImageTexture.CreateFromImage(im);
     }
 }

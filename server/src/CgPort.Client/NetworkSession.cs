@@ -371,6 +371,9 @@ public sealed class NetworkSession : IGameSession
             case "rU":    // I：道具
                 OnItems(rest.Trim());
                 break;
+            case "vWpn":  // SI：服务端确认两格对调（移动、装备后都发，cgmsv 之后不再补 rU；exe 0x471962 本地对调 28 格里的两格）
+                SwapSlots(D62Safe(f[0]), f.Length > 1 ? D62Safe(f[1]) : -1);
+                break;
             case "zzd":   // EF：天气 标志(1 雨 2 雪 4 彩纸) 强度 0–7（exe 0x45852a → 0x453cc9）；cgmsv 平时发 "0 0"
                 Weather = (D62Safe(f[0]), f.Length > 1 ? D62Safe(f[1]) : 0);
                 WeatherChanged?.Invoke(Weather.Flags, Weather.Level);
@@ -1461,6 +1464,17 @@ public sealed class NetworkSession : IGameSession
         Player.Equipment = _slots.Values.Where(x => x.Slot is >= 0 and < 8).ToList();
         StatusChanged?.Invoke();
     }
+    private void SwapSlots(int a, int b)
+    {
+        if (a < 0 || b < 0 || a >= 28 || b >= 28 || a == b) return;
+        _slots.TryGetValue(a, out var ia); _slots.TryGetValue(b, out var ib);
+        _slots.Remove(a); _slots.Remove(b);
+        if (ia != null) { ia.Slot = b; _slots[b] = ia; }
+        if (ib != null) { ib.Slot = a; _slots[a] = ib; }
+        Player.Items = _slots.Values.Where(x => x.Slot >= 8).ToList();
+        Player.Equipment = _slots.Values.Where(x => x.Slot is >= 0 and < 8).ToList();
+        StatusChanged?.Invoke();
+    }
     private readonly Dictionary<int, string> _names = new();
     public string? ItemName(int id) => _names.TryGetValue(id, out var n) ? n : null;
 
@@ -1715,7 +1729,7 @@ public sealed class NetworkSession : IGameSession
     }
 
     /// <summary>登出（CharLogout = WA）：通知服务端后断开。</summary>
-    public void Logout() { SaveMapCache(); if (InGame) Send("WA"); InGame = false; try { _stream?.Close(); } catch { } }
+    public void Logout() { SaveMapCache(); if (InGame) Send("WA"); InGame = false; _closed = true; try { _stream?.Close(); } catch { } }   // 主动登出：标记关闭，不触发断线重连
 
     /// <summary>说话（聊天框）。空格按协议转义成 \S。</summary>
     public void Say(string text) => Send("uSr", B62(X), B62(Y), "P|" + text.Replace(" ", "\\S"), "5", "5", "1");   // 官方实测 "uSr x y P|hello123 5 5 1"：颜色 5（绿，聊天设定默认）

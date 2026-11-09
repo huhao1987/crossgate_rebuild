@@ -685,7 +685,7 @@ static int Net(string hostPort, string account, string? mapDir)
 
 
 // 打包手机数据：pack <游戏目录> <输出.cgpak>
-// 只装游戏真正读的文件：argument.ini 允许的图像/动画组 + 调色板 + 地图格子用的 GraphicInfo + 服务端 data（不含 exe 和工具）。
+// 只装游戏真正读的文件：argument.ini 允许的图像/动画组 + 调色板 + 地图格子用的 GraphicInfo + 服务端 data（不含工具；客户端 exe 只为了里面的界面图资源）。
 static int PackGame(string root, string output)
 {
     var det = CgPort.Core.Assets.AssetDetector.Detect(root);
@@ -694,6 +694,10 @@ static int PackGame(string root, string output)
     Add("data/argument.ini");
     foreach (var st in det.Sets) { Add(st.GraphicInfo); Add(st.Graphic); Add(st.AnimeInfo); Add(st.Anime); }
     foreach (var gi in CgPort.Core.TileInfoTable.DefaultGraphicInfoFiles) Add("bin/" + gi);
+    // 这个客户端的新界面图 / 大地图标注在 exe 资源里（PeResources），寻路坐标点在 data/mappoint.dat
+    foreach (var exe in Directory.EnumerateFiles(root, "*.exe"))
+        if (CgPort.Core.Assets.PeResources.Load(exe) is { } rr && rr.Get("10", 208) != null) { Add(Path.GetFileName(exe)); break; }
+    Add("data/mappoint.dat");
     var pal = Path.Combine(root, "bin", "pal");
     if (Directory.Exists(pal)) foreach (var f in Directory.EnumerateFiles(pal, "*", SearchOption.AllDirectories)) Add(Path.GetRelativePath(root, f));
     if (det.ServerDir != null)

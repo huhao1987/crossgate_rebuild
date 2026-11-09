@@ -33,7 +33,7 @@ public partial class Main : Node2D
     private SystemPanel _system = null!;
     private SkillPanel _skills = null!;
     private MapPanel _mapWin = null!;
-    public MapPanel MapWin => _mapWin;
+   
     public SkillPanel SkillWin => _skills;
     private ItemPanel _items = null!;
     public StatusPanel StatusWin => _status;
@@ -406,6 +406,18 @@ public partial class Main : Node2D
         AddChild(_status);
         _mapWin = new MapPanel { Cache = _cache, Where = () => (_view?.Map, _session.X, _session.Y), MapName0 = () => _session.CurrentMap?.Name ?? "" };
         AddChild(_mapWin);
+        ExeArt.Init(_cfg.GameRoot);
+        (MapData?, int, int, string) Here() => (_view?.Map, _session.X, _session.Y, (_session.CurrentMap?.Name is { Length: > 0 } n ? n : _view?.Map.Name ?? "").Split('|')[0]);
+        _bigMap = new BigMapWindow { Cache = _cache, Cfg = _cfg, Where = Here, Go = t => WalkTo(t) };
+        _bigMap.Explored = (x, y) => _view?.Map is { } m && _mapWin.IsExplored(m, x, y);
+        AddChild(_bigMap);
+        _autoPath = new AutoPathWindow { Cache = _cache, Where = Here, Go = t => WalkTo(t), Back = () => { _mapWin.Visible = true; _mapWin.Refresh(); }, Points = MapTools.LoadPoints(_cfg.GameRoot) };
+        AddChild(_autoPath);
+        _pointEdit = new PointEditWindow { Cache = _cache, Saved = () => { MapTools.SavePoints(_autoPath.Points); _autoPath.Visible = true; _autoPath.Refresh(); } };
+        AddChild(_pointEdit);
+        _autoPath.Edit = p => { _autoPath.Visible = false; _pointEdit.Open(p); };
+        _mapWin.OpenAutoPath = () => { _mapWin.Visible = false; _autoPath.Visible = true; _autoPath.Refresh(); };
+        _mapWin.OpenBigMap = () => _bigMap.Open();
         _skills = new SkillPanel { Cache = _cache, Player = () => _session.Player };
         _skills.TechChosen = (sk, t) => _prod?.UseTech(sk, t);
         _skills.Swap = (a, b) => (_session as NetworkSession)?.SwapSkills(a, b);
@@ -631,6 +643,9 @@ public partial class Main : Node2D
     private bool _resultPending;
     private FunctionPanel _func = null!;
     private Weather? _weather;
+    private BigMapWindow _bigMap = null!; private AutoPathWindow _autoPath = null!; private PointEditWindow _pointEdit = null!;
+    public BigMapWindow BigMap => _bigMap; public AutoPathWindow AutoPath => _autoPath;
+    public MapPanel MapWin => _mapWin;
     private Rect2I? _walkDirty; private double _walkT;
     public Weather? WeatherFx => _weather;
     public FunctionPanel FuncUi => _func;

@@ -42,6 +42,8 @@ public sealed class GameConfig
     public int BgmVolume = 80, SeVolume = 80;
     /// <summary>系统 → 绘图设定（官方 4.06）：隐藏画面角色（别的玩家不画）、显示 NPC 名字。</summary>
     public bool HidePlayers, ShowNpcNames = true;
+    /// <summary>大地图「显示选项」7 类（官方默认：地点、村镇、NPC 打勾），位 0–6 = 标注类别 0–6。</summary>
+    public int MapLabelMask = 0b1010001;
     /// <summary>联网：登录后显示选角色界面（char_select，默认开；自动测试关掉 = 自动进第一个角色）。</summary>
     public bool CharSelect = true;
 
@@ -166,7 +168,7 @@ public sealed class GameConfig
             Encounters = o["encounters"]?.GetValue<bool>() ?? true,
             Zoom = (float)(o["zoom"]?.GetValue<double>() ?? 1.0),
             LoadSave = o["load_save"]?.GetValue<bool>() ?? true,
-            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), HidePlayers = Int(o, "hide_players", 0) != 0, CharSelect = Int(o, "char_select", 1) != 0, ShowNpcNames = Int(o, "npc_names", 1) != 0, UiMode = Str(o, "ui_mode", ""),
+            Mode = Str(o, "mode", "local"), TimePalette = Int(o, "time_palette", -1), Host = Str(o, "host", "127.0.0.1"), Port = Int(o, "port", 9030), ShowFps = Int(o, "show_fps", 0) != 0, BgmVolume = Int(o, "bgm_volume", 80), SeVolume = Int(o, "se_volume", 80), HidePlayers = Int(o, "hide_players", 0) != 0, CharSelect = Int(o, "char_select", 1) != 0, ShowNpcNames = Int(o, "npc_names", 1) != 0, MapLabelMask = Int(o, "map_labels", 0b1010001), UiMode = Str(o, "ui_mode", ""),
             Account = Str(o, "account", ""), Password = Str(o, "password", ""), CdKey = Str(o, "cdkey", ""),
         };
         if (o["start"] is JsonArray st && st.Count == 2) { c.StartX = st[0]!.GetValue<int>(); c.StartY = st[1]!.GetValue<int>(); }
