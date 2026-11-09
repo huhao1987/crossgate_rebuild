@@ -50,15 +50,38 @@ public partial class MapView : Node2D
         AddChild(_floorObjects);
         Entities = new Node2D { YSortEnabled = true };
         AddChild(Entities);
-        for (int y = 0; y < map.Height; y++)
-            for (int x = 0; x < map.Width; x++)
+        IndexObjects(0, 0, map.Width, map.Height);
+    }
+
+    // 物件编号 ≤ 999 不是图：0–10 是通行标记，其余（如 200–263 编辑器标记"凤"字橙块）官方都不画（exe 0x4343ff 起）
+    private void IndexObjects(int x0, int y0, int x1, int y1)
+    {
+        for (int y = y0; y < y1; y++)
+            for (int x = x0; x < x1; x++)
             {
-                int mid = map.Objects[map.Index(x, y)];
-                if (mid == 0) continue;
+                int mid = Map.Objects[Map.Index(x, y)];
+                if (mid <= 999) continue;
                 var key = new Vector2I(x / Chunk, y / Chunk);
                 if (!_chunkObjects.TryGetValue(key, out var l)) _chunkObjects[key] = l = new();
                 l.Add((x, y, mid));
             }
+    }
+
+    /// <summary>服务端补了一块地图（aBS）：重建涉及的物件区块、重画地面。</summary>
+    public void ApplyPatch(int x1, int y1, int x2, int y2)
+    {
+        x1 = Math.Max(0, x1); y1 = Math.Max(0, y1); x2 = Math.Min(Map.Width, x2); y2 = Math.Min(Map.Height, y2);
+        if (x2 <= x1 || y2 <= y1) return;
+        int cx0 = x1 / Chunk, cy0 = y1 / Chunk, cx1 = (x2 - 1) / Chunk, cy1 = (y2 - 1) / Chunk;
+        for (int cy = cy0; cy <= cy1; cy++)
+            for (int cx = cx0; cx <= cx1; cx++)
+            {
+                var k = new Vector2I(cx, cy);
+                _chunkObjects.Remove(k);
+                IndexObjects(cx * Chunk, cy * Chunk, Math.Min(Map.Width, (cx + 1) * Chunk), Math.Min(Map.Height, (cy + 1) * Chunk));
+                if (_liveChunks.Remove(k, out var nodes)) foreach (var n in nodes) n.QueueFree();
+            }
+        _lastView = default;   // 下一帧重新生成可见区块、重画地面
     }
 
     private void SpawnChunk(Vector2I key)

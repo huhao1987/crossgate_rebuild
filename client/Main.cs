@@ -16,9 +16,11 @@ public partial class Main : Node2D
     private GameConfig _cfg = null!;
     private AssetLibrary _assets = null!;
     private TextureCache _cache = null!;
+    public TextureCache Cache => _cache;
     private TileInfoTable _tiles = null!;
     private IGameSession _session = null!;
     private MapView? _view;
+    public MapView? View => _view;
     private AnimSprite _player = null!;
     private Label _playerTag = null!;
     private Camera2D _cam = new();
@@ -163,6 +165,7 @@ public partial class Main : Node2D
             {
                 Host = _cfg.Host, Port = _cfg.Port, Account = _cfg.Account, Password = _cfg.Password,
                 CdKey = _cfg.CdKey.Length > 0 ? _cfg.CdKey : _cfg.Account, ManualCharSelect = _cfg.CharSelect,
+                MapCacheDir = ProjectSettings.GlobalizePath($"user://mapcache/{_cfg.Host}_{_cfg.Port}"),
                 ResolveMap = f => serverMaps.TryGetValue(f, out var m) ? m.Path
                     : GameFiles.Exists(Path.Combine(_cfg.GameRoot, "map", "0", f + ".dat")) ? Path.Combine(_cfg.GameRoot, "map", "0", f + ".dat") : null,
             });
@@ -205,6 +208,19 @@ public partial class Main : Node2D
         if (_session is NetworkSession nsR)
         {
             // 官方：战斗画面退出、回到地图后才出结果窗口
+            // 天气（EF）：屏幕层，在所有窗口下面；战斗画面时不画
+            var wl = new CanvasLayer { Layer = 1 }; AddChild(wl); MoveChild(wl, 0);
+            _weather = new Weather();
+            for (int i = 0; i < 256; i++) { uint c = _assets.Palette.Colors[i]; _weather.Palette[i] = new Color(((c >> 16) & 255) / 255f, ((c >> 8) & 255) / 255f, (c & 255) / 255f); }
+            wl.AddChild(_weather);
+            nsR.WeatherChanged += (fl, lv) => _weather.Set(fl, lv);
+            nsR.MapPatched += (x1, y1, x2, y2) =>
+            {
+                if (_view == null || _view.Map != nsR.Map) return;
+                _view.ApplyPatch(x1, y1, x2, y2);
+                var r = new Rect2I(x1, y1, x2 - x1, y2 - y1);
+                _walkDirty = _walkDirty is { } d ? d.Merge(r) : r;
+            };
             nsR.SoundRequested += id => _audio?.PlaySe(id);
             nsR.BgmRequested += id => _audio?.PlayBgm(id);
             nsR.BattleResultReceived += r => { if (!_battleUi.Visible && !nsR.InBattle) _result.Show(r); else _resultPending = true; };
@@ -487,8 +503,14 @@ public partial class Main : Node2D
         _player.GetParent()?.RemoveChild(_player);
         _view?.QueueFree();
         _npcNodes.Clear();
-        if (string.IsNullOrEmpty(info.MapFile) || !GameFiles.Exists(info.MapFile)) { _toast.Show($"本地没有地图 {info.MapId} 的文件", 5); return; }
-        var map = MapData.Load(info.MapFile, info.MapId, info.Name);
+        MapData map;
+        if (_session is NetworkSession nmap && nmap.Map != null) map = nmap.Map;   // 联网：会话里那张（缓存/空图 + 服务端 aBS 补）
+        else
+        {
+            if (string.IsNullOrEmpty(info.MapFile) || !GameFiles.Exists(info.MapFile)) { _toast.Show($"本地没有地图 {info.MapId} 的文件", 5); return; }
+            map = MapData.Load(info.MapFile, info.MapId, info.Name);
+        }
+        _walkDirty = null;
         // 调色板：地图指定的优先（室内多为 0），否则随游戏时间变化
         _mapPalette = map.Palette;
         _cache.PaletteNo = CurrentPalette();
@@ -608,6 +630,9 @@ public partial class Main : Node2D
     private BattleResultWindow _result = null!;
     private bool _resultPending;
     private FunctionPanel _func = null!;
+    private Weather? _weather;
+    private Rect2I? _walkDirty; private double _walkT;
+    public Weather? WeatherFx => _weather;
     public FunctionPanel FuncUi => _func;
     public BattleResultWindow ResultUi => _result;
     public EmoteWindow? EmoteUi => _emote;
@@ -783,6 +808,18 @@ public partial class Main : Node2D
     public override void _Process(double delta)
     {
         UpdateCovered();
+        if (_weather != null) _weather.Visible = !_battleUi.Visible;
+        if (_walkDirty is { } wd && _view != null && (_walkT += delta) > 0.3)
+        {
+            // 服务端补了地图：重算通行（物件会占邻格，整张重算），寻路网格只更新补过的范围（外扩 4 格）
+            _walkT = 0; _walkDirty = null;
+            var wm = _view.Map;
+            _view.Walk = Walkability.Build(wm, _tiles);
+            var rr = wd.Grow(4).Intersection(new Rect2I(0, 0, wm.Width, wm.Height));
+            for (int yy = rr.Position.Y; yy < rr.End.Y; yy++)
+                for (int xx = rr.Position.X; xx < rr.End.X; xx++)
+                    _astar.SetPointSolid(new Vector2I(xx, yy), !_view.Walk.IsWalkable(xx, yy));
+        }
         if ((_palCheck += delta) > 5 && _cache != null && _session?.CurrentMap != null)
         {
             _palCheck = 0;

@@ -20,6 +20,8 @@ public sealed class NetworkOptions
     public string NewCharName { get; set; } = "移植测试";
     /// <summary>楼层编号 → 本地地图文件（服务端 LS2MAP 或客户端缓存 MAP），找不到返回 null。</summary>
     public Func<int, string?> ResolveMap { get; set; } = _ => null;
+    /// <summary>地图缓存目录（官方 map/0/楼层.dat）：进图先读这里，服务端补的块（aBS）写回这里。null = 不缓存。</summary>
+    public string? MapCacheDir { get; set; }
     /// <summary>每个收发的封包都回调一次（调试/抓包用）："C xxx" / "S xxx"。</summary>
     public Action<string>? Trace { get; set; }
     /// <summary>true：收到角色列表后不自动进第一个角色，交给界面（选角色 / 创建 / 删除）。</summary>
@@ -177,6 +179,7 @@ public sealed class NetworkSession : IGameSession
                 bool wasIn = InGame;
                 InGame = false; Connected = false;
                 GameLog?.Invoke($"连接断开（{_lastError ?? "服务器关闭了连接"}），之前{(wasIn ? "在游戏里" : "还没进游戏")}");
+                SaveMapCache();
                 Disconnected?.Invoke(_lastError ?? "服务器断开了连接");
                 continue;
             }
@@ -217,7 +220,14 @@ public sealed class NetworkSession : IGameSession
                 if (f[0] == "successful") Send("Gp"); else Error?.Invoke("删除角色失败：" + Unesc(rest));
                 break;
             case "hPUd":  // CharLogin
-                if (f[0] == "successful") { InGame = true; Status?.Invoke("已进入游戏"); }
+                if (f[0] == "successful")
+                {
+                    InGame = true; Status?.Invoke("已进入游戏");
+                    // 官方 hPUd 成功后固定紧跟三包（exe 0x4513e3）：CCL GetTickCount(62)、Ot 三组未设定、lz 0
+                    Send("CCL", B62(Environment.TickCount & 0x7fffffff));
+                    Send("Ot", "0", "未设定", "0", "未设定", "0", "未设定", "\\S");
+                    Send("lz", "0");
+                }
                 else Error?.Invoke("进入游戏失败：" + Unesc(rest));
                 break;
             case "PudO":  // LI：自己的对象 id、服务端 unix 时间（62 进制）
@@ -323,8 +333,12 @@ public sealed class NetworkSession : IGameSession
             case "wiB":   // BGMW：服务端换背景音乐（第 1 段 = 音乐号）
                 BgmRequested?.Invoke(D62Safe(f[0]));
                 break;
-            case "aBS":   // M：服务端推一块地图（楼层 x1 y1 x2 y2 图块,…|物件,…|事件,…），我们只用事件层
+            case "aBS":   // M：服务端推一块地图（楼层 x1 y1 x2 y2 图块,…|物件,…|事件,…）
+                ApplyMapPatch(f);
                 OnMapPatch(f);
+                break;
+            case "jmb":   // MC：地图校验，对不上就要 UUN
+                OnMapChecksum(f);
                 break;
             case "Ov":    // POS：战斗位置 0 前排 1 后排
                 BackRow = f[0] == "1"; StatusChanged?.Invoke();
@@ -356,6 +370,13 @@ public sealed class NetworkSession : IGameSession
                 break;
             case "rU":    // I：道具
                 OnItems(rest.Trim());
+                break;
+            case "zzd":   // EF：天气 标志(1 雨 2 雪 4 彩纸) 强度 0–7（exe 0x45852a → 0x453cc9）；cgmsv 平时发 "0 0"
+                Weather = (D62Safe(f[0]), f.Length > 1 ? D62Safe(f[1]) : 0);
+                WeatherChanged?.Invoke(Weather.Flags, Weather.Level);
+                break;
+            case "OaHi":  // EP：遇敌率 起始 上限
+                _encCur = D62Safe(f[0]); _encMax = f.Length > 1 ? D62Safe(f[1]) : 0; _encSteps = 0;
                 break;
             case "dAgg":  // EN：进入战斗（"dAgg 0 0" = 对战/突袭失败，官方随后 "Zd 突发战斗失败"）
                 if (f.Length > 0 && f[0] == "0") break;
@@ -517,11 +538,13 @@ public sealed class NetworkSession : IGameSession
 
     private void OnMapChange(string[] f)
     {
+        SaveMapCache();
         _floor = D62(f[1]);
         X = D62(f[4]); Y = D62(f[5]);
         _token = f[^1].Length > 0 ? f[^1] : f[^2];
         _objects.Clear(); _ground.Clear();
         var file = _opt.ResolveMap(_floor) ?? "";
+        LoadMap(_floor, D62Safe(f[2]), D62Safe(f[3]), file);
         CurrentMap = new MapInfo(_floor, "", file);
         Player.MapId = _floor; Player.X = X; Player.Y = Y;
         MapEntered?.Invoke(CurrentMap, X, Y);
@@ -656,6 +679,117 @@ public sealed class NetworkSession : IGameSession
         Send("pg", B62(e), "0", B62(X), B62(Y), "-1");
     }
     public IReadOnlyDictionary<(int, int), int> EventTiles => _events;
+
+    // ———————————————————— 地图同步（MC = jmb、M = UUN / aBS，exe 0x457f67 → 0x434239）————————————————————
+    // 服务端每走几步发 jmb 楼层 地图 x1 y1 x2 y2 地面校验 物件校验 事件校验（区域最大 27×27）。
+    // 官方把本地这块（行优先，宽 x2−x1，出界的格子当 0）三层各算 CRC：每个 u16 拆成两字节（低字节在前），
+    // 补 0 到 1458 字节（27×27×2），字节先按位反转再进 CRC-16/CCITT（多项式 1021，初值 0）；第三层只取低 12 位。
+    // 对不上（或连续对上 10 次）就发 UUN 同样 6 段 → 服务端回 aBS 同区域三层（逗号分隔 62 进制，层间 |）。
+    // 官方本地没有这张图就按 GmNM 的宽高建空图，全靠 aBS 补，并写回 map/0/楼层.dat。
+    public MapData? Map { get; private set; }
+    public event Action<int, int, int, int>? MapPatched;
+    private bool _mapDirty;
+    private DateTime _mapSaved = DateTime.UtcNow;
+    private int _mcOk;
+    private static readonly byte[] BitRev = Enumerable.Range(0, 256).Select(i => { int r = 0; for (int b = 0; b < 8; b++) if ((i & (1 << b)) != 0) r |= 0x80 >> b; return (byte)r; }).ToArray();
+    private static readonly ushort[] Crc16 = Enumerable.Range(0, 256).Select(i => { int c = i << 8; for (int k = 0; k < 8; k++) c = (c & 0x8000) != 0 ? (c << 1) ^ 0x1021 : c << 1; return (ushort)c; }).ToArray();
+
+    private string? CachePath(int floor) => _opt.MapCacheDir is { } d ? Path.Combine(d, floor + ".dat") : null;
+
+    private void LoadMap(int floor, int w, int h, string file)
+    {
+        MapData? m = null;
+        foreach (var path in new[] { CachePath(floor), file })
+        {
+            if (string.IsNullOrEmpty(path) || !GameFiles.Exists(path)) continue;
+            try { m = MapData.Load(path, floor); } catch { m = null; }
+            if (m != null && (w <= 0 || (m.Width == w && m.Height == h))) break;
+            m = null;
+        }
+        Map = m ?? (w > 0 && h > 0 ? MapData.Blank(floor, w, h) : null);
+        _mapDirty = m == null && Map != null; _mcOk = 0;
+    }
+
+    /// <summary>把补过的地图写回缓存（换图、断线时；走动中最多 15 秒一次）。</summary>
+    public void SaveMapCache()
+    {
+        if (!_mapDirty || Map == null || CachePath(Map.Id) is not { } p) return;
+        try { Directory.CreateDirectory(Path.GetDirectoryName(p)!); File.WriteAllBytes(p, Map.ToClientBytes()); _mapDirty = false; _mapSaved = DateTime.UtcNow; }
+        catch (Exception e) { _opt.Trace?.Invoke("! 存地图缓存失败 " + e.Message); }
+    }
+
+    private static ushort RegionCrc(ushort[] layer, MapData m, int x1, int y1, int x2, int y2, bool low12)
+    {
+        int w = x2 - x1, h = y2 - y1, c = 0;
+        for (int i = 0; i < 729; i++)
+        {
+            int v = 0;
+            if (i < w * h)
+            {
+                int x = x1 + i % w, y = y1 + i / w;
+                if (m.InBounds(x, y)) { v = layer[m.Index(x, y)]; if (low12) v &= 0xfff; }
+            }
+            c = (BitRev[v & 255] ^ Crc16[(c >> 8) & 255] ^ (c << 8)) & 0xffff;
+            c = (BitRev[v >> 8] ^ Crc16[(c >> 8) & 255] ^ (c << 8)) & 0xffff;
+        }
+        return (ushort)c;
+    }
+
+    private void OnMapChecksum(string[] f)
+    {
+        if (f.Length < 9 || Map == null || D62Safe(f[1]) != _floor) return;
+        int x1 = D62Safe(f[2]), y1 = D62Safe(f[3]), x2 = D62Safe(f[4]), y2 = D62Safe(f[5]);
+        if (x2 - x1 <= 0 || y2 - y1 <= 0 || (x2 - x1) * (y2 - y1) > 729) return;
+        bool same = RegionCrc(Map.Ground, Map, x1, y1, x2, y2, false) == D62Safe(f[6])
+                 && RegionCrc(Map.Objects, Map, x1, y1, x2, y2, false) == D62Safe(f[7])
+                 && RegionCrc(Map.Events, Map, x1, y1, x2, y2, true) == D62Safe(f[8]);
+        if (same && ++_mcOk < 10) return;
+        _mcOk = 0;
+        Send("UUN", f[0], f[1], f[2], f[3], f[4], f[5]);
+    }
+
+    /// <summary>aBS 三层写进地图（第三层保留高位标志，官方收到过的格子置 0xC000）。</summary>
+    private void ApplyMapPatch(string[] f)
+    {
+        if (Map == null || f.Length < 7 || D62Safe(f[1]) != _floor) return;
+        int x1 = D62Safe(f[2]), y1 = D62Safe(f[3]), x2 = D62Safe(f[4]), y2 = D62Safe(f[5]), w = x2 - x1;
+        if (w <= 0) return;
+        var layers = string.Join(' ', f.Skip(6)).Split('|');
+        bool changed = false;
+        for (int li = 0; li < Math.Min(3, layers.Length); li++)
+        {
+            var v = layers[li].Trim().Split(',');
+            var arr = li == 0 ? Map.Ground : li == 1 ? Map.Objects : Map.Events;
+            for (int i = 0; i < v.Length && i < w * (y2 - y1); i++)
+            {
+                int x = x1 + i % w, y = y1 + i / w;
+                if (!Map.InBounds(x, y)) continue;
+                int val = v[i].Length > 0 ? D62Safe(v[i]) : 0;
+                int k = Map.Index(x, y);
+                ushort nv = li == 2 ? (ushort)(val & 0xfff | 0xC000) : (ushort)val;
+                if (arr[k] != nv) { arr[k] = nv; changed = true; }
+            }
+        }
+        if (changed) { _mapDirty = true; MapPatched?.Invoke(x1, y1, x2, y2); }
+        if (_mapDirty && (DateTime.UtcNow - _mapSaved).TotalSeconds > 15) SaveMapCache();
+    }
+
+    // ———————————————————— 遇敌率（EP/EN，exe 0x4597b1 / 0x4354e5）————————————————————
+    // 服务端 OaHi 起始% 上限%（换图时发，城里 "0 0"、野外如 "1 2"）。官方客户端自己掷骰：
+    // 单人或队长每走一格 rand%100 < 当前率 → 先发 KeOX 当前x y（EN）再走；走满 5 格后每格当前率 +1 直到上限。
+    // cgmsv 实测不靠 KeOX 开战（服务端自己遇敌），但其它服务端可能靠它，照官方发。
+    public (int Flags, int Level) Weather { get; private set; }
+    public event Action<int, int>? WeatherChanged;
+    private int _encCur, _encMax, _encSteps;
+    public (int Cur, int Max) EncounterRate => (_encCur, _encMax);
+    private readonly Random _rng = new();
+    private void RollEncounter()
+    {
+        bool hit = false;
+        if ((!InParty || IsPartyLeader) && _rng.Next(100) < _encCur) { hit = true; _encSteps = 0; }
+        if (_encSteps > 5) { if (_encMax > _encCur) _encCur++; } else _encSteps++;
+        if (hit) Send("KeOX", B62(X), B62(Y));
+    }
     public event Action<int>? SoundRequested;
     public event Action<int>? BgmRequested;
 
@@ -764,6 +898,7 @@ public sealed class NetworkSession : IGameSession
         if (f.Length < 1 || f[0] != "0") { ChatReceived?.Invoke(Pick(StallBrowseErr, f.Length > 0 ? f[0] : "", "没有可以浏览的摊位"), 4); return; }
         var v = new StallView { OwnerId = f.Length > 1 ? D62Safe(f[1]) : _browseTarget, Desc = f.Length > 2 ? Unesc(f[2]) : "" };
         if (_objects.Values.FirstOrDefault(o => o.Id == v.OwnerId) is { } o) { v.OwnerName = o.Name; v.OwnerAnime = o.AppearanceId; }
+        Send("TLKH", "3", B62(v.OwnerId));   // PRD：官方摊位窗口打开后紧跟着要对方名片（exe 0x45b0fc，限 0.5 秒一次；cgmsv 不回）
         if (f.Length > 4)
         {
             var t = f[4].Split('|');
@@ -1552,6 +1687,7 @@ public sealed class NetworkSession : IGameSession
         if (!InBattle) return;
         InBattle = false; _pending = null; _lastCommand = null;
         BattleEnded?.Invoke(o);
+        Send("eL", "0");   // EO：官方回到地图后发（exe 0x45aba8，等待标志 0x18706d4 清掉时）；cgmsv 回自己的 nsY
     }
 
     private BattleView View() => new(_turn, _units.ToList(), PlayerUnitId());
@@ -1569,6 +1705,7 @@ public sealed class NetworkSession : IGameSession
     {
         if (!InGame || InBattle || dir < 0 || dir > 7) return MoveResult.InvalidStep;
         if (InParty && !IsPartyLeader) return MoveResult.Blocked;   // 队员跟着队长走，自己不能走（要先离队）
+        RollEncounter();
         Send("zA", B62(X), B62(Y), DirLetters[dir].ToString(), _token);
         var (dx, dy) = Directions.Deltas[dir];
         X += dx; Y += dy; Player.X = X; Player.Y = Y;   // 本地预测；服务端不同意会发 QBt 校正
@@ -1578,7 +1715,7 @@ public sealed class NetworkSession : IGameSession
     }
 
     /// <summary>登出（CharLogout = WA）：通知服务端后断开。</summary>
-    public void Logout() { if (InGame) Send("WA"); InGame = false; try { _stream?.Close(); } catch { } }
+    public void Logout() { SaveMapCache(); if (InGame) Send("WA"); InGame = false; try { _stream?.Close(); } catch { } }
 
     /// <summary>说话（聊天框）。空格按协议转义成 \S。</summary>
     public void Say(string text) => Send("uSr", B62(X), B62(Y), "P|" + text.Replace(" ", "\\S"), "5", "5", "1");   // 官方实测 "uSr x y P|hello123 5 5 1"：颜色 5（绿，聊天设定默认）

@@ -17,6 +17,32 @@ public sealed class MapData
     public int Height { get; init; }
     public ushort[] Ground { get; init; } = Array.Empty<ushort>();
     public ushort[] Objects { get; init; } = Array.Empty<ushort>();
+    /// <summary>第三层：低 12 位是事件（服务端 aBS 第 3 段），高位是客户端自己的标志（官方缓存里收到过的格子是 0xC000）。没有就全 0。</summary>
+    public ushort[] Events { get; init; } = Array.Empty<ushort>();
+
+    /// <summary>空白地图（官方：本地没有缓存时按 GmNM 给的宽高建一张空图，内容全靠服务端 aBS 补）。</summary>
+    public static MapData Blank(int id, int w, int h) => new()
+    {
+        Id = id, Width = w, Height = h, Format = "client",
+        Ground = new ushort[w * h], Objects = new ushort[w * h], Events = new ushort[w * h],
+    };
+
+    /// <summary>存成官方客户端 map/0/楼层.dat 格式："MAP\x01" + 8 字节 0 + 宽 高(int32) + 地面 + 物件 + 第三层（小端 u16）。</summary>
+    public byte[] ToClientBytes()
+    {
+        int n = Width * Height;
+        var d = new byte[20 + n * 6];
+        d[0] = (byte)'M'; d[1] = (byte)'A'; d[2] = (byte)'P'; d[3] = 1;
+        BinaryPrimitives.WriteInt32LittleEndian(d.AsSpan(12), Width);
+        BinaryPrimitives.WriteInt32LittleEndian(d.AsSpan(16), Height);
+        for (int i = 0; i < n; i++)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(20 + i * 2), Ground[i]);
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(20 + n * 2 + i * 2), Objects[i]);
+            BinaryPrimitives.WriteUInt16LittleEndian(d.AsSpan(20 + n * 4 + i * 2), Events.Length == n ? Events[i] : (ushort)0);
+        }
+        return d;
+    }
     public string Format { get; init; } = "";
     /// <summary>地图指定的调色板编号（服务端地图名字段 "名字|编号"）；-1 = 随游戏时间变化（野外、城镇）。</summary>
     public int Palette { get; init; } = -1;
@@ -37,6 +63,7 @@ public sealed class MapData
                 Id = id, Name = name ?? "", Width = w, Height = h, Format = "server", Palette = HeaderPalette(d),
                 Ground = ReadU16(d, 44, n, bigEndian: true),
                 Objects = ReadU16(d, 44 + n * 2, n, bigEndian: true),
+                Events = d.Length >= 44 + n * 6 ? ReadU16(d, 44 + n * 4, n, bigEndian: true) : new ushort[n],
             };
         }
         if (d.Length >= 20 && d[0] == 'M' && d[1] == 'A' && d[2] == 'P')
@@ -49,6 +76,7 @@ public sealed class MapData
                 Id = id, Name = name ?? "", Width = w, Height = h, Format = "client",
                 Ground = ReadU16(d, 20, n, bigEndian: false),
                 Objects = ReadU16(d, 20 + n * 2, n, bigEndian: false),
+                Events = d.Length >= 20 + n * 6 ? ReadU16(d, 20 + n * 4, n, bigEndian: false) : new ushort[n],
             };
         }
         throw new InvalidDataException($"无法识别的地图文件: {path}");

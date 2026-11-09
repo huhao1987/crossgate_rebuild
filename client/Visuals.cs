@@ -59,7 +59,9 @@ public sealed class TextureCache
 
     public (ImageTexture? Tex, GraphicEntry? Entry) ByMapId(int mapId)
     {
-        if (!_lib.Graphics.TryByMapId(mapId, out var set, out var e)) return (null, null);
+        // 编号 0 = 没有图（GraphicInfo 里大量图的地图编号字段是 0，按 0 查会拿到一张无关的图：
+        // 阿巴尼斯村"告示"等外观 0 的 NPC 就被画成橙色菱形 + 字，官方不画）
+        if (mapId <= 0 || !_lib.Graphics.TryByMapId(mapId, out var set, out var e)) return (null, null);
         return (Get(set, e), e);
     }
 
