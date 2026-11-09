@@ -12,7 +12,7 @@ public partial class NetShot : SceneTree
         var root = System.Environment.GetEnvironmentVariable("CG_ROOT") ?? "/home/claude/wine/client";   // 也可以是 .cgpak 数据包
         var o = JsonNode.Parse(GameConfig.BuildJson(root, AssetDetector.Detect(root), 1000))!.AsObject();
         o["server_dir"] = System.Environment.GetEnvironmentVariable("CG_SERVERDIR") ?? "../cgmsv"; o["mode"] = System.Environment.GetEnvironmentVariable("CG_MODE") ?? "network"; o["host"] = "127.0.0.1"; o["port"] = 9030;
-        o["account"] = System.Environment.GetEnvironmentVariable("CG_ACCOUNT") ?? "test2"; o["password"] = "123456"; o["load_save"] = false;
+        o["account"] = System.Environment.GetEnvironmentVariable("CG_ACCOUNT") ?? "test2"; o["char_select"] = 0; o["password"] = "123456"; o["load_save"] = false;
         if (System.Environment.GetEnvironmentVariable("CG_MODE") == "local" && System.Environment.GetEnvironmentVariable("CG_WARP") is { } lw)
         { var w = lw.Split(' '); o["start_map"] = int.Parse(w[0]); o["start"] = new JsonArray(int.Parse(w[1]), int.Parse(w[2])); o["encounters"] = false; if (System.Environment.GetEnvironmentVariable("CG_ANIME") is { } an) o["player_anime"] = int.Parse(an); }
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());

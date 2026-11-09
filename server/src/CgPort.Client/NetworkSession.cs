@@ -22,6 +22,8 @@ public sealed class NetworkOptions
     public Func<int, string?> ResolveMap { get; set; } = _ => null;
     /// <summary>每个收发的封包都回调一次（调试/抓包用）："C xxx" / "S xxx"。</summary>
     public Action<string>? Trace { get; set; }
+    /// <summary>true：收到角色列表后不自动进第一个角色，交给界面（选角色 / 创建 / 删除）。</summary>
+    public bool ManualCharSelect { get; set; }
 }
 
 /// <summary>
@@ -209,7 +211,10 @@ public sealed class NetworkSession : IGameSession
                 OnCharList(f);
                 break;
             case "DZ":    // CreateNewChar
-                if (f[0] == "successful") Send("Gp"); else Error?.Invoke("创建角色失败：" + rest);
+                if (f[0] == "successful") Send("Gp"); else { Error?.Invoke("创建角色失败：" + Unesc(rest)); CharCreateFailed?.Invoke(Unesc(rest)); }
+                break;
+            case "oy":    // CharDelete 结果
+                if (f[0] == "successful") Send("Gp"); else Error?.Invoke("删除角色失败：" + Unesc(rest));
                 break;
             case "hPUd":  // CharLogin
                 if (f[0] == "successful") { InGame = true; Status?.Invoke("已进入游戏"); }
@@ -221,6 +226,7 @@ public sealed class NetworkSession : IGameSession
                 break;
             case "GmNM":  // CC：进图
                 if (Bank != null) CloseBank();   // 换图（传送）银行窗口就关
+                _events.Clear(); _lastEvent = (-1, -1);
                 _stalls.Clear(); if (Browsing != null) { Browsing = null; StallChanged?.Invoke(); }
                 OnMapChange(f);
                 break;
@@ -310,6 +316,15 @@ public sealed class NetworkSession : IGameSession
             case "We":    // TROC：0 中止、1 对方确认、2 完成
                 if (f[0] == "1") { if (Trade != null) { Trade.TheyConfirmed = true; TradeChanged?.Invoke(); } }
                 else { Trade = null; TradeChanged?.Invoke(); TradeEnded?.Invoke(f[0] == "2"); }
+                break;
+            case "murD":  // PLAYSE：服务端让客户端放一个音效（实测 "murD R 0 0"，第 1 段 = 音效号 62 进制）
+                SoundRequested?.Invoke(D62Safe(f[0]));
+                break;
+            case "wiB":   // BGMW：服务端换背景音乐（第 1 段 = 音乐号）
+                BgmRequested?.Invoke(D62Safe(f[0]));
+                break;
+            case "aBS":   // M：服务端推一块地图（楼层 x1 y1 x2 y2 图块,…|物件,…|事件,…），我们只用事件层
+                OnMapPatch(f);
                 break;
             case "Ov":    // POS：战斗位置 0 前排 1 后排
                 BackRow = f[0] == "1"; StatusChanged?.Invoke();
@@ -436,6 +451,26 @@ public sealed class NetworkSession : IGameSession
         }
     }
 
+    // ———— 选角色 / 创建 / 删除（官方 bob 实测 2026-11-09）————
+    // 角色列表 Daj 0 名字|位置\z头像\z等级\z体\z力\z强\z速\z魔\z地\z水\z火\z风\z上线次数\z名字\z注册号\z职业\z?\z形象\z-1|…（位置 0 左页 1 右页）
+    // 进入 emRV 注册号(62) 位置 头像(62)；创建 aSEl 位置 名字 形象 头像 体 力 强 速 魔 地 水 火 风（62 进制）→ DZ successful 注册号 → 重新要列表；
+    // 删除（要按住 Ctrl 再点「是」）Godf 注册号 → oy successful。
+    public sealed record CharSlot(int Pos, string Name, int Face, int Level, int[] Stats, int[] Elements, int Logins, long RegNo, string Job, int Anime);
+    public IReadOnlyList<CharSlot?> CharSlots { get; private set; } = new CharSlot?[2];
+    public event Action<IReadOnlyList<CharSlot?>>? CharListReceived;
+    public event Action<string>? CharCreateFailed;
+    private int _chosenSlot = -1;
+    public void EnterChar(int pos)
+    {
+        if (CharSlots.ElementAtOrDefault(pos) is not { } c) return;
+        _chosenSlot = pos; Player.Name = c.Name; Player.Level = c.Level;
+        Status?.Invoke($"进入角色 {c.Name}…");
+        Send("emRV", B62(c.RegNo), pos.ToString(), B62(c.Face));
+    }
+    public void CreateChar(int pos, string name, int anime, int face, int[] stats, int[] elements) =>
+        Send("aSEl", new[] { pos.ToString(), name.Replace(" ", "\\S"), B62(anime), B62(face) }.Concat(stats.Select(v => B62(v))).Concat(elements.Select(v => B62(v))).Append("").ToArray());   // 官方最后带一个空格；不带的话服务端把属性当成 0（实测）
+    public void DeleteChar(int pos) { if (CharSlots.ElementAtOrDefault(pos) is { } c) Send("Godf", B62(c.RegNo)); }
+
     private void OnCharList(string[] f)
     {
         if (f.Length < 2 || f[0] != "0")
@@ -446,6 +481,22 @@ public sealed class NetworkSession : IGameSession
         }
         var list = string.Join(' ', f.Skip(1)).Trim();
         var chars = list.Split('|', StringSplitOptions.RemoveEmptyEntries);
+        if (_opt.ManualCharSelect)
+        {
+            var slots = new CharSlot?[2];
+            for (int i = 0; i + 1 < chars.Length; i += 2)
+            {
+                var q = chars[i + 1].Split("\\\\z");
+                if (q.Length < 18 || !int.TryParse(q[0], out var pos) || pos is < 0 or > 1) continue;
+                int I(int k) => int.TryParse(q[k], out var v) ? v : 0;
+                slots[pos] = new CharSlot(pos, Unesc(chars[i]), I(1), I(2), new[] { I(3), I(4), I(5), I(6), I(7) }, new[] { I(8), I(9), I(10), I(11) }, I(12), long.TryParse(q[14], out var rg) ? rg : 0, Unesc(q[15]), I(17));
+            }
+            CharSlots = slots;
+            // 断线重连：直接进刚才那个角色
+            if (Reconnects > 0 && _chosenSlot >= 0 && slots[_chosenSlot] is { } again) { EnterChar(_chosenSlot); return; }
+            CharListReceived?.Invoke(slots);
+            return;
+        }
         // 每个角色占两段："名字" 和 "位置\\z头像\\z等级\\z…\\z注册号\\z职业\\z…\\z形象\\z-1"
         for (int i = 0; i + 1 < chars.Length; i += 2)
         {
@@ -576,6 +627,38 @@ public sealed class NetworkSession : IGameSession
         }
     }
 
+    // ———————————————————— 事件格（官方 bob 实测）————————————————————
+    // 走到宠物店门口这类格子：服务端推 "aBS 0 楼层 x y x+1 y+1 图块||a"（事件层 a = 10），官方客户端站上去就发
+    // EV "pg 事件 0 x y -1"（62 进制）→ 服务端才传送（GmNM）。不发 pg 的话站在门口没反应。
+    private readonly Dictionary<(int, int), int> _events = new();
+    private (int, int) _lastEvent = (-1, -1);
+    private void OnMapPatch(string[] f)
+    {
+        if (f.Length < 7) return;
+        int floor = D62Safe(f[1]), x1 = D62Safe(f[2]), y1 = D62Safe(f[3]), x2 = D62Safe(f[4]);
+        if (floor != _floor) return;
+        var layers = string.Join(' ', f.Skip(6)).Split('|');
+        if (layers.Length < 3) return;
+        var ev = layers[2].Trim().Split(',');
+        int w = Math.Max(1, x2 - x1);
+        for (int i = 0; i < ev.Length; i++)
+        {
+            int x = x1 + i % w, y = y1 + i / w;
+            if (ev[i].Length > 0 && D62Safe(ev[i]) is int e and > 0) _events[(x, y)] = e; else _events.Remove((x, y));
+        }
+        CheckEventTile();
+    }
+    private void CheckEventTile()
+    {
+        if (!_events.TryGetValue((X, Y), out var e)) { _lastEvent = (-1, -1); return; }
+        if (_lastEvent == (X, Y)) return;
+        _lastEvent = (X, Y);
+        Send("pg", B62(e), "0", B62(X), B62(Y), "-1");
+    }
+    public IReadOnlyDictionary<(int, int), int> EventTiles => _events;
+    public event Action<int>? SoundRequested;
+    public event Action<int>? BgmRequested;
+
     // ———————————————————— 战斗结果 / 卡时（官方 bob 实测 2026-11-09）————————————————————
     // Gn -2|升级|经验,宠物栏|升级|经验,…(3 只),道具号\z名字|道具号\z名字|道具号\z名字|,技能0,…技能19
     //   数字是 62 进制；技能段 "升级|经验" 或空（= +0）。窗口「戰鬥結果」23380 几秒后自己关。
@@ -611,7 +694,7 @@ public sealed class NetworkSession : IGameSession
             {
                 foreach (var it in p)
                 {
-                    var q = it.Split("\\z");
+                    var q = it.Split("\\\\z");
                     if (q.Length >= 2 && int.TryParse(q[0], out var id)) items.Add((id, Unesc(q[1])));
                 }
             }
@@ -1490,6 +1573,7 @@ public sealed class NetworkSession : IGameSession
         var (dx, dy) = Directions.Deltas[dir];
         X += dx; Y += dy; Player.X = X; Player.Y = Y;   // 本地预测；服务端不同意会发 QBt 校正
         Moved?.Invoke(X, Y, dir);
+        CheckEventTile();
         return MoveResult.Ok;
     }
 

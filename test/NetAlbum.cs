@@ -19,7 +19,7 @@ public partial class NetAlbum : SceneTree
     {
         var root = "/home/claude/wine/client";
         var o = JsonNode.Parse(GameConfig.BuildJson(root, AssetDetector.Detect(root), 1000))!.AsObject();
-        o["server_dir"] = "../cgmsv"; o["mode"] = "network"; o["host"] = "127.0.0.1"; o["port"] = 9030; o["account"] = "test1"; o["password"] = "123456"; o["load_save"] = false;
+        o["server_dir"] = "../cgmsv"; o["mode"] = "network"; o["host"] = "127.0.0.1"; o["port"] = 9030; o["account"] = "test1"; o["char_select"] = 0; o["password"] = "123456"; o["load_save"] = false;
         o["player_anime"] = 106002;
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());
         _cache = ProjectSettings.GlobalizePath("user://album_127.0.0.1_9030.txt");

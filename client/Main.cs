@@ -162,7 +162,7 @@ public partial class Main : Node2D
             var net = new NetworkSession(new NetworkOptions
             {
                 Host = _cfg.Host, Port = _cfg.Port, Account = _cfg.Account, Password = _cfg.Password,
-                CdKey = _cfg.CdKey.Length > 0 ? _cfg.CdKey : _cfg.Account,
+                CdKey = _cfg.CdKey.Length > 0 ? _cfg.CdKey : _cfg.Account, ManualCharSelect = _cfg.CharSelect,
                 ResolveMap = f => serverMaps.TryGetValue(f, out var m) ? m.Path
                     : GameFiles.Exists(Path.Combine(_cfg.GameRoot, "map", "0", f + ".dat")) ? Path.Combine(_cfg.GameRoot, "map", "0", f + ".dat") : null,
             });
@@ -205,6 +205,8 @@ public partial class Main : Node2D
         if (_session is NetworkSession nsR)
         {
             // 官方：战斗画面退出、回到地图后才出结果窗口
+            nsR.SoundRequested += id => _audio?.PlaySe(id);
+            nsR.BgmRequested += id => _audio?.PlayBgm(id);
             nsR.BattleResultReceived += r => { if (!_battleUi.Visible && !nsR.InBattle) _result.Show(r); else _resultPending = true; };
             nsR.StatusChanged += () => _hudSkin?.SetBurst(nsR.BurstSeconds);
         }
@@ -450,8 +452,16 @@ public partial class Main : Node2D
         _calib = new CalibrationPanel { Cache = _cache, Cfg = _cfg, Notify = m => _toast.Show(m, 2) };
         AddChild(_calib);
 
+        if (_session is NetworkSession nsc && _cfg.CharSelect)
+        {
+            _charSel = new CharSelectScreen { Cache = _cache, Session = nsc, Visible = false };
+            _charSel.Back = () => { nsc.Logout(); _charSel.Visible = false; AddChild(new SetupScreen { Layer = 50 }); };
+            AddChild(_charSel);
+        }
         _session.Start();
     }
+    private CharSelectScreen? _charSel;
+    public CharSelectScreen? CharSelectUi => _charSel;
 
     private void AutoSave()
     {

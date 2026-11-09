@@ -29,7 +29,7 @@ public partial class NetE2E : SceneTree
         var o = JsonNode.Parse(GameConfig.BuildJson(root, AssetDetector.Detect(root), 1000))!.AsObject();
         o["server_dir"] = "../cgmsv";
         o["mode"] = "network"; o["host"] = "127.0.0.1"; o["port"] = 9030;
-        o["account"] = acct; o["password"] = "123456";
+        o["account"] = acct; o["char_select"] = 0; o["password"] = "123456";
         o["player_anime"] = 106002; o["act_stand"] = 0; o["act_walk"] = 1; o["load_save"] = false;
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());
         _main = (Main)GD.Load<PackedScene>("res://client/main.tscn").Instantiate();

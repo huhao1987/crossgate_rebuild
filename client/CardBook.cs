@@ -166,11 +166,11 @@ public partial class ConfirmBox : CanvasLayer
     private Action? _yes;
     public override void _Ready() { Layer = 30; Visible = false; }
 
-    public void Ask(string text, Action yes)
+    public void Ask(string text, Action yes, Vector2? at = null)
     {
         _yes = yes;
         foreach (var c in GetChildren()) c.QueueFree();
-        var win = new Control { Position = new Vector2(2, 3), Size = new Vector2(257, 188) };
+        var win = new Control { Position = at ?? new Vector2(2, 3), Size = new Vector2(257, 188) };
         AddChild(win);
         win.AddChild(new Control { Size = win.Size, MouseFilter = Control.MouseFilterEnum.Stop });
         win.AddChild(CgFrame.Tint(win.Size));

@@ -20,7 +20,7 @@ public partial class NetTradePet : SceneTree
     {
         var root = "/home/claude/wine/client";
         var o = JsonNode.Parse(GameConfig.BuildJson(root, AssetDetector.Detect(root), 1000))!.AsObject();
-        o["server_dir"] = "../cgmsv"; o["mode"] = "network"; o["host"] = "127.0.0.1"; o["port"] = 9030; o["account"] = "test1"; o["password"] = "123456"; o["load_save"] = false;
+        o["server_dir"] = "../cgmsv"; o["mode"] = "network"; o["host"] = "127.0.0.1"; o["port"] = 9030; o["account"] = "test1"; o["char_select"] = 0; o["password"] = "123456"; o["load_save"] = false;
         o["player_anime"] = 106002;
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());
         _m = (Main)GD.Load<PackedScene>("res://client/main.tscn").Instantiate(); Root.AddChild(_m);
@@ -41,9 +41,10 @@ public partial class NetTradePet : SceneTree
                 if ((_b.Flags & 32) == 0) _b.ToggleFlag(32);
                 s.Say($"/warp {_b.CurrentMap.MapId} 0 {_b.X} {_b.Y + 1}"); _st = 1; _f = 0; break;
             case 1 when _f > 90 && s!.X == _b.X && s.Y == _b.Y + 1:
-                _phase = 0;
-                if (_b.Player.Pets.Count == 0) { Check(false, "test3 没有宠物可给"); return End(); }
-                _petName = _b.Player.Pets[0].Name; _petsA0 = s.Player.Pets.Count;
+                // test3 有宠物就从 A 开始（它给 hao）；没有就从 B 开始（hao 给它，C 再还回来）
+                if (_b.Player.Pets.Count > 0) { _phase = 0; _petName = _b.Player.Pets[0].Name; }
+                else { _phase = 1; _petName = s.Player.Pets.OrderByDescending(p => p.Slot).First().Name; }
+                _petsA0 = s.Player.Pets.Count;
                 StartTrade(); _st = 2; _f = 0; break;
             case 1 when _f > 600: Check(false, $"没站好：({s!.X},{s.Y}) test3 ({_b.X},{_b.Y})"); return End();
             case 2 when s!.TradeCandidates.Count > 0 && _f > 40 || _f > 200:
