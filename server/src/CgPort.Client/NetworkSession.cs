@@ -283,6 +283,9 @@ public sealed class NetworkSession : IGameSession
             case "gnxd":  // AB：名片簿全部 60 张（每张 7 段：有效|名字|称号|?|等级|在线|头像）
                 OnCards(rest.Trim());
                 break;
+            case "aDn":   // GI：家族信息（exe 0x456c36），见 OnGuildInfo
+                OnGuildInfo(rest.Trim().Split('|'));
+                break;
             case "vI":    // ABI：更新一张名片 "序号 1|名字|称号|?|等级|在线|头像|…"
                 if (f.Length >= 2 && int.TryParse(f[0], out var ci)) { SetCard(ci, string.Join(' ', f.Skip(1)).Split('|'), 0); CardsChanged?.Invoke(); }
                 break;
@@ -979,7 +982,11 @@ public sealed class NetworkSession : IGameSession
     //   写信：名片上点「郵件」→ 编辑邮件 → 「送出」→ MSG "CV 名片序号 内容 0"（空格写成 \S）→ "Zd 已将邮件送交hao。"
     //   收信：MSG "Mhbt 名片序号 日期|内容|-1 0"（对方不在线时，等他上线再发；日期例 "2026/11/\S4\S\S9:02"）。
 
-    public sealed record AddressCard(int Index, string Name, string Title, int Level, bool Online, int Portrait);
+    public sealed record AddressCard(int Index, string Name, string Title, int Level, bool Online, int Portrait)
+    {
+        /// <summary>家族名（ABI 第 9 段，exe 0x452045 起最多 40 字节；没加入家族是空的）。</summary>
+        public string Guild { get; init; } = "";
+    }
     public sealed record Mail(int CardIndex, string Name, string Date, string Text, bool Incoming)
     {
         /// <summary>宠物邮件：送信宠物的图像、等级、名字，带的道具图像（-1 没带）。普通邮件 PetImage = 0。</summary>
@@ -1008,7 +1015,7 @@ public sealed class NetworkSession : IGameSession
         if (idx < 0 || idx >= 60) return;
         if (o + 6 >= p.Length || p[o] != "1" || p[o + 1].Length == 0) { _cards[idx] = null; return; }
         int I(int k) => int.TryParse(p[o + k], out var v) ? v : 0;
-        _cards[idx] = new AddressCard(idx, Unesc(p[o + 1]), Unesc(p[o + 2]), I(4), I(5) != 0, I(6));
+        _cards[idx] = new AddressCard(idx, Unesc(p[o + 1]), Unesc(p[o + 2]), I(4), I(5) != 0, I(6)) { Guild = o + 8 < p.Length ? Unesc(p[o + 8]) : "" };
     }
 
     private void OnMail(string[] f)
@@ -2091,6 +2098,7 @@ public sealed class NetworkSession : IGameSession
         if (type == 23) { OnBank(f); return; }   // 银行（保险箱）窗口，见 OnBank
         _window = new Window(type, mask, f[2], f[3]);
         if (type is 17 or 18) { OnSkillShop(type, string.Join(' ', f.Skip(4)).Split('|')); return; }
+        if (type == 32) { GuildBeastChanged?.Invoke(ParseGuildBeast(string.Join(' ', f.Skip(4)))); return; }
         var data = string.Join(' ', f.Skip(4));
         int bar = data.IndexOf('|');
         int? header = null;
@@ -2165,6 +2173,109 @@ public sealed class NetworkSession : IGameSession
         Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, btn, sel);
         DialogChanged?.Invoke(null);   // 服务端如果还有下一页，会再发 BZ
     }
+    /// <summary>按一个按钮同时带数据（输入窗口：确定 + 输入的文字）。</summary>
+    public void AnswerWith(string button, string data)
+    {
+        if (_window == null) return;
+        var w = _window; _window = null;
+        Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, B62(WindowButtons.FirstOrDefault(b => b.Name == button).Bit), data);
+        DialogChanged?.Invoke(null);
+    }
+    // ---- 家族 ----
+    // 官方 4.06cn 客户端只处理 GI（aDn）这一个家族封包（收包分派表里 GD/GML/RGM/GMI/GM/GT/GC 都没有处理代码），
+    // 家族成员名单、家族邮件这些界面这个版本都没有；GI 的内容只在家族兽窗口里用。
+    public int GuildId { get; private set; } = -1;
+    public string GuildName { get; private set; } = "";
+    public string GuildRoom { get; private set; } = "";
+    /// <summary>自己在家族里的职称号（0 = 族长，31 = 未设定）；家族兽窗口只有 0 能改名（exe 0x4317f9）。</summary>
+    public int GuildTitleId { get; private set; } = -1;
+    /// <summary>职称权限位（GI 第 0x100 位的值 −100，exe 0x456dc0）；位 8 = 可以喂家族兽（exe 0x4318b6）。</summary>
+    public int GuildCommission { get; private set; }
+    public event Action? GuildChanged;
+
+    /// <summary>
+    /// GI：第 1 段是 62 进制位掩码，后面按位从低到高各一段（位 0 = 全部都有）：
+    /// 0x2 家族号、0x4 家族名、0x8 会馆名、0x10 职称号、0x20 时间、0x40/0x80 不用、0x100 权限+100、0x200/0x400/0x800 文字。
+    /// 实测：建家族后 "4|浩之家"、"8|浩之馆"、"4U|0|时间|159"；登录 "1|10001|浩之家|浩之馆|31|时间|0|1|64|\S|\S|\S|2|"。
+    /// </summary>
+    private void OnGuildInfo(string[] p)
+    {
+        if (p.Length == 0) return;
+        int mask = D62Safe(p[0]), k = 1;
+        string Next() => k < p.Length ? p[k++] : "";
+        int NextInt() => int.TryParse(Next(), out var v) ? v : 0;
+        bool Has(int bit) => (mask & (bit | 1)) != 0;
+        if (Has(0x2)) GuildId = NextInt();
+        if (Has(0x4)) GuildName = Unesc(Next());
+        if (Has(0x8)) GuildRoom = Unesc(Next());
+        if (Has(0x10)) GuildTitleId = NextInt();
+        if (Has(0x20)) Next();
+        if (Has(0x40)) Next();
+        if (Has(0x80)) Next();
+        if (Has(0x100)) GuildCommission = NextInt() - 100;
+        GuildChanged?.Invoke();
+    }
+
+    /// <summary>家族兽窗口（BZ 种类 32）的内容：名字 + 最多 20 行说明。</summary>
+    public sealed record GuildBeast(string Name, IReadOnlyList<string> Lines);
+    /// <summary>服务端开 / 刷新家族兽窗口；null = 关掉。</summary>
+    public event Action<GuildBeast?>? GuildBeastChanged;
+
+    /// <summary>
+    /// exe 0x422730：第 1 段（| 分隔）是名字，第 2 段反转义后按换行切行：每行最多 30 字节（超了就不再往下读），
+    /// 超过 28 字节的折成 28 字节一行，总共最多 20 行。
+    /// </summary>
+    public static GuildBeast ParseGuildBeast(string data)
+    {
+        int bar = data.IndexOf('|');
+        var name = Unesc(bar >= 0 ? data[..bar] : data);
+        var body = bar >= 0 ? data[(bar + 1)..] : "";
+        int bar2 = body.IndexOf('|'); if (bar2 >= 0) body = body[..bar2];
+        body = Unesc(body);
+        var lines = new List<string>();
+        var segs = body.Split('\n');
+        // 切行用的 0x4789b8 读到字符串结尾就返回 1，循环随即结束：最后一个换行后面的那段（没有换行收尾的末行）不显示（官方实测）
+        foreach (var raw in segs.Take(segs.Length - 1))
+        {
+            if (lines.Count >= 20) break;
+            var b = CgPort.Core.Text.Gbk.Encode(raw);
+            if (b.Length > 30) break;
+            if (b.Length <= 28) { lines.Add(raw); continue; }
+            foreach (var part in WrapGbk(raw, 28)) { if (lines.Count >= 20) break; lines.Add(part); }
+        }
+        return new GuildBeast(name, lines);
+    }
+
+    /// <summary>按 GBK 字节宽度折行（中文字不拆开）。</summary>
+    private static IEnumerable<string> WrapGbk(string s, int width)
+    {
+        var sb = new StringBuilder(); int n = 0;
+        foreach (var ch in s)
+        {
+            int w = ch < 0x80 ? 1 : 2;
+            if (n + w > width) { yield return sb.ToString(); sb.Clear(); n = 0; }
+            sb.Append(ch); n += w;
+        }
+        if (sb.Length > 0) yield return sb.ToString();
+    }
+
+    /// <summary>家族兽改名：xD … 按钮 0 "N|名字"（exe 0x4317b8，格式串 0x47d3f0）。</summary>
+    public void GuildBeastRename(string name)
+    {
+        if (_window is not { Type: 32 } w || name.Length == 0) return;
+        _window = null;
+        Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, "0", "N|" + name.Replace("\\", "\\\\").Replace(" ", "\\S"));
+    }
+    /// <summary>家族兽喂食：xD … 按钮 3 "I|背包格"（exe 0x4316df，格式串 0x47d3f8）。</summary>
+    public void GuildBeastFeed(int bagSlot)
+    {
+        if (_window is not { Type: 32 } w) return;
+        _window = null;
+        Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, "3", "I|" + bagSlot);
+    }
+    /// <summary>关掉家族兽窗口（官方点 × 不发包）。</summary>
+    public void GuildBeastClose() { if (_window is { Type: 32 }) _window = null; GuildBeastChanged?.Invoke(null); }
+
     public Item? ItemInfo(int itemId) => _items.TryGetValue(itemId, out var i) ? i : null;
     public void Save(string path) { }   // 联网模式存档在服务端
 

@@ -75,6 +75,8 @@ public partial class Main : Node2D
     public PetMailPetsWindow PetMailPetsUi => _petMailPets;
     public PetMailEditWindow PetMailEditUi => _petMailEdit;
     public PetMailItemWindow PetMailItemsUi => _petMailItems;
+    private GuildBeastWindow _guildBeast = null!;
+    public GuildBeastWindow GuildBeastUi => _guildBeast;
     private readonly HashSet<string> _fxHidden = new();
     public int PetMailFxCount { get; private set; }
     private ConfirmBox _confirm = null!;
@@ -360,6 +362,15 @@ public partial class Main : Node2D
         _mailType.Back = () => _cardBook.Toggle();
         _petMailPets.Back = () => { _mailType.Visible = true; _mailType.Refresh(); };
         _petMailPets.Picked = slot => { _petMailEdit.Open(_mailCard, slot); _petMailItems.Visible = true; _petMailItems.Refresh(); };
+        // 家族兽窗口（BZ 32）：道具从物品窗口拿起来，点格子放进去
+        _guildBeast = new GuildBeastWindow { Cache = _cache, Session = () => _session as NetworkSession, Notice = t => _chat.Add(t, 4) };
+        _guildBeast.TakeHeld = () => _items != null && _items.Held >= 8 ? _items.TakeHeld() : -1;
+        AddChild(_guildBeast);
+        if (_session is NetworkSession nsGb)
+        {
+            nsGb.GuildBeastChanged += b => _guildBeast.Show(b);
+            nsGb.StatusChanged += () => { if (_guildBeast.Visible) _guildBeast.Refresh(); };
+        }
         _petMailItems.Selected = () => _petMailEdit.ItemSlot;
         _petMailItems.Select = slot => { _petMailEdit.ItemSlot = slot; _petMailEdit.Refresh(); };
         _petMailEdit.Back = () => { _petMailItems.Visible = false; _petMailPets.Visible = true; _petMailPets.Refresh(); };
@@ -1015,7 +1026,7 @@ public partial class Main : Node2D
         if (_func != null) _func.Visible = !c && !_session.InBattle && _session is NetworkSession;
         bool l = (_status?.Visible ?? false) || (_skills?.Visible ?? false) || (_system?.Visible ?? false)
               || (_pets?.Visible ?? false) || (_petDetail?.Visible ?? false)
-              || (_cardBook?.Visible ?? false) || (_album?.Visible ?? false) || (_prod?.AnyVisible ?? false) || (_mailEdit?.Visible ?? false) || (_mailRecord?.Visible ?? false) || (_mailType?.Visible ?? false) || (_petMailPets?.Visible ?? false) || (_petMailEdit?.Visible ?? false);
+              || (_cardBook?.Visible ?? false) || (_album?.Visible ?? false) || (_prod?.AnyVisible ?? false) || (_mailEdit?.Visible ?? false) || (_mailRecord?.Visible ?? false) || (_mailType?.Visible ?? false) || (_petMailPets?.Visible ?? false) || (_petMailEdit?.Visible ?? false) || (_guildBeast?.Visible ?? false);
         if (l != _leftCovered) { _leftCovered = l; _hudSkin?.SetLeftCovered(l); }
     }
 

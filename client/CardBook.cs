@@ -39,6 +39,7 @@ public partial class CardBookWindow : CgWindow
             Txt(c.Online ? "在线" : "离线", 107, 41 + dy, c.Online ? new Color(1, 1, 0) : Colors.White, center: true);
             Txt(c.Level.ToString(), 207, 46 + dy, right: true);
             Txt(c.Name, 113, 61 + dy);
+            Txt(c.Guild, 113, 80 + dy);
             Txt(c.Title, 113, 98 + dy);
             Btn(23101, 23102, 211, 42 + dy, () => WriteMail?.Invoke(idx));
             Btn(23103, 23104, 211, 66 + dy, () => ShowRecord?.Invoke(idx));

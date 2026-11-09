@@ -572,6 +572,16 @@ static int Net(string hostPort, string account, string? mapDir)
                 continue;
             }
             if (raw.StartsWith("SAY ")) { s.Say(raw[4..]); Pump(() => false, 1500); continue; }
+            if (raw.StartsWith("TALK "))   // 和附近叫这个名字的 NPC 说话
+            {
+                var who = s.NpcsOnCurrentMap().FirstOrDefault(n => n.Name == raw[5..]);
+                Console.WriteLine(who == null ? "找不到 " + raw[5..] : $"对话 {who.Name}({who.X},{who.Y})");
+                if (who != null) { s.TalkTo(who.Id); Pump(() => false, 2000); }
+                continue;
+            }
+            if (raw.StartsWith("STEP ")) { foreach (var c in raw[5..]) { s.Step(c - '0'); Pump(() => false, 500); } Console.WriteLine($"走到 {s.CurrentMap?.MapId} ({s.X},{s.Y})"); continue; }
+            if (raw.StartsWith("ANSB ")) { var q = raw[5..].Split(' ', 2); s.AnswerWith(q[0], q.Length > 1 ? q[1] : ""); Pump(() => false, 1500); continue; }
+            if (raw.StartsWith("ANS ")) { s.Answer(raw[4..]); Pump(() => false, 1500); continue; }
             if (raw.StartsWith("FACE ")) { var d = raw[5..].Split(' ').Select(int.Parse).ToArray(); s.Face(d[0], d[1]); Pump(() => false, 600); continue; }
             s.SendRaw(raw); Pump(() => false, 1200);
         }
