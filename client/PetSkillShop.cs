@@ -46,7 +46,7 @@ public partial class PetSkillShopWindow : CgWindow
         Clear();
         if (Page?.Shop is not { } list) return;
         if (ConfirmSlot >= 0) { BuildConfirm(list); return; }
-        var cyan = ChatLog.Palette[1]; var grey = ChatLog.Palette[7];
+        var num = Colors.White; var grey = ChatLog.Palette[7];   // 数字：官方实拍是白字
         Img(Page.Kind == "petskill" ? 23090 : Page.Kind == "petpick" ? 23091 : 23092, 0, 0, block: true);
         Txt(Page.NpcName, 288, 14, Colors.White, center: true);
         var said = Message == 0 || Page.AltTexts == null ? Page.Text : Page.AltTexts[Message - 1];
@@ -65,8 +65,8 @@ public partial class PetSkillShopWindow : CgWindow
                 int i = PageNo * 8 + k; if (i >= list.Count) break;
                 var e = list[i]; float y = 87 + 32 * k;
                 Txt(e.Name, 88, y + 4, Colors.White, center: true);
-                Txt($"{e.Image,4}", 204, y + 6, cyan);
-                Txt($"{e.Price,7}", 256, y + 6, cyan);
+                Txt($"{e.Image,4}", 204, y + 6, num);
+                Txt($"{e.Price,7}", 256, y + 6, num);
                 Row(18, y - 4, 327, 22, i, () => PickSkill(i));
             }
             if (_hover >= 0 && _hover < list.Count) Desc(list[_hover].Desc, 30, 360);
@@ -81,7 +81,7 @@ public partial class PetSkillShopWindow : CgWindow
                     var e = list[k]; float y = 134 + 40 * k; int kk = k;
                     bool ok = e.Count >= Page.SourceItem;
                     Txt(e.Name, 76 + 68, y + 4, ok ? Colors.White : grey, center: true);
-                    Txt($"{e.Count,4}", 266, y + 6, ok ? cyan : grey);
+                    Txt($"{e.Count,4}", 266, y + 6, ok ? num : grey);
                     var hit = Row(70, y - 4, 230, 22, -1, () => PickPet(kk));
                     hit.TooltipText = ok ? "让该宠物学习此技能。" : "宠物等级不足。";
                 }
@@ -98,7 +98,7 @@ public partial class PetSkillShopWindow : CgWindow
                     if (e.Name.Length > 0)
                     {
                         Txt(e.Name, 50 + 102, y + 6, Colors.White, center: true);
-                        Txt($"{e.Image,4}", 258, y + 8, cyan);
+                        Txt($"{e.Image,4}", 258, y + 8, num);
                     }
                     var hit = Row(60, y - 2, 244, 20, k, () => PickSlot(kk));
                     hit.TooltipText = "使用此栏来学习技能。";
@@ -107,13 +107,14 @@ public partial class PetSkillShopWindow : CgWindow
             }
         }
         CBtn(23076, 23077, 464, 390, Cancel, "取消让宠物学习技能。");
+        Btn(22509, 22510, 551, 6, Cancel);   // 右上角 ×（官方实拍有，和商店窗口同一个位置）
     }
 
     private void SkillHead(ShopEntry s)
     {
         Txt(s.Name, 88, 49, Colors.White, center: true);
-        Txt($"{s.Image,4}", 203, 51, ChatLog.Palette[1]);
-        Txt($"{s.Price,7}", 256, 50, ChatLog.Palette[1]);
+        Txt($"{s.Image,4}", 203, 51, Colors.White);
+        Txt($"{s.Price,7}", 256, 50, Colors.White);
     }
 
     private void Desc(string text, float x, float y) =>

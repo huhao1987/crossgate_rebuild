@@ -172,7 +172,7 @@ public partial class ShopMenuWindow : CgWindow
         Img(23050, 0, 0, block: true);
         Txt(p.NpcName, 145 + Ox, 8 + Oy + 6, Colors.White, center: true);
         NpcFigure.Add(Body, Cache, new Vector2(43 + Ox, 134 + Oy), p.Face, StandAct, 3);
-        var lines = Wrap(p.Text.Replace("\n", ""), 26).Take(5).ToList();
+        var lines = Wrap(p.Text.Replace("\n", ""), 20).Take(5).ToList();   // 官方一行 20 字节（[0x119e9f4]=0x14；实拍交换银"有银的人我可以帮你弄／成银条喔!"）
         for (int k = 0; k < lines.Count; k++) Txt(lines[k], 97 + Ox, 44 + 21 * k + Oy + 6, Colors.White);
         // 同一个背景的三种入口：商店（BZ 5，0x423681）、技能导师（BZ 16，0x425e94：字 (150,157+24k)，点的范围 x 140–260）、
         // 交易入口（BZ 27，0x428d82：两项 (170,177+24k)）

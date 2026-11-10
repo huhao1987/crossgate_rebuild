@@ -63,6 +63,7 @@ public partial class BoardWindow : CgWindow
         Body.AddChild(_input);
         CBtn(23216, 23217, 552, 394, Write, "进行留言。");
         CBtn(23214, 23215, 552, 420, Close, "不再留言。");
+        Btn(22509, 22510, 564, 6, Close);   // 右上角 ×（官方实拍：红框在窗口 (569–580, 10–21)）
         if (Page.Buttons.Contains("prev")) CBtn(23225, 23226, 190, 354, () => Turn(0x10), "转到前一页。");
         if (Page.Buttons.Contains("next")) CBtn(23227, 23228, 390, 354, () => Turn(0x20), "转到后一页。");
     }
