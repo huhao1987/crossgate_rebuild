@@ -903,32 +903,65 @@ public partial class BattleUi : CanvasLayer
     public int SealsShown { get; private set; }
 
     /// <summary>
-    /// 封印（抓宠）：使用者原地播攻击动作甩出卡片，目标身上出效果；抓到了 → 目标缩小淡出（被收走），没抓到 → 飘"失败"。
-    /// （官方有专门的卡片飞行和封印动画，编号还没对上，先用这个。）
+    /// 封印（抓宠），照官方 exe 0x46a265 建的卡片对象（每帧处理 0x460ad2，8 个状态，按 60 帧/秒）：
+    ///   0 使用者甩卡（投掷动作），目标脚下出现卡片 110095，音效 212；
+    ///   1 卡片从 0 放大到 1（每帧 +0.025）；到了 → 目标身上放 110097（往上的蓝光），持续 270 帧；
+    ///   2/3 音效 213，目标随机缩放：大于 0.6 就缩到 0.2–0.4，否则涨到 0.7–0.9，每帧 0.01，到了再挑下一个，270 帧用完为止；
+    ///   4 没抓到：目标涨回 1，音效 212；5 抓到：目标缩到 0 消失，音效 212；
+    ///   6 卡片每帧 −0.025 缩到 0 消失。官方画面没有文字提示。
     /// </summary>
     private async Task PlaySeal(Unit a, Unit t, bool ok)
     {
         SealsShown++;
         await PlayOnce(a.Sprite, a.Sprite.HasAct(Cfg.ActThrow) ? Cfg.ActThrow : Cfg.ActAttack);   // 扔卡片 = 投掷动作 7
         a.Sprite.Act = Cfg.ActStand;
-        Effect(t, ok ? new Color(1f, 0.95f, 0.4f) : new Color(0.7f, 0.7f, 0.7f));
-        if (ok)
+        var baseScale = t.Sprite.Scale;
+        AnimSprite? Spawn(int anime, int z)
         {
-            Say($"{Name(a.Id)} 封印了 {t.Sprite.Name}！");
-            Float(t, "封印成功", new Color(1f, 0.9f, 0.3f));
-            t.Down = true;
-            var tw = t.Sprite.CreateTween().SetSpeedScale(Speed).SetParallel();
-            tw.TweenProperty(t.Sprite, "scale", t.Sprite.Scale * 0.2f, 0.6);
-            tw.TweenProperty(t.Sprite, "modulate:a", 0.0, 0.6);
-            await Wait(0.7);
-            t.Sprite.Visible = false; t.Bar.Visible = false; t.Tag.Visible = false;
+            var acts = Cache.Library.AnimeActions(anime);
+            if (acts.Count == 0) return null;
+            var k = acts.Keys.OrderBy(x => x.Act).ThenBy(x => x.Dir).First();
+            var fx = new AnimSprite { Cache = Cache, AnimeId = anime, Dir = k.Dir, Act = k.Act, FallbackAct = k.Act, Position = t.Sprite.Position, Scale = Vector2.Zero, ZIndex = z, SoundCue = f => GameAudio.I?.Cue(f) };
+            _stage.AddChild(fx);
+            return fx;
         }
-        else
+        var card = Spawn(110095, -1);
+        GameAudio.Se(212);
+        float cs = 0;
+        while (cs < 1) { cs = Math.Min(1, cs + 0.025f * await Frames()); if (card != null) card.Scale = baseScale * cs; }
+        var beam = Spawn(110097, 9);
+        if (beam != null) beam.Scale = baseScale;
+        float left = 270, sc = 1, goal = 1;
+        var rng = new Random();
+        bool pick = true;
+        while (left > 0)
         {
-            Say($"{Name(a.Id)} 封印失败");
-            Float(t, "封印失败", Colors.LightGray);
-            await Wait(0.6);
+            if (pick)
+            {
+                GameAudio.Se(213);
+                goal = sc > 0.6f ? rng.Next(2, 5) / 10f : rng.Next(7, 10) / 10f;
+                pick = false;
+            }
+            float f = await Frames(); left -= f;
+            sc = goal < sc ? Math.Max(goal, sc - 0.01f * f) : Math.Min(goal, sc + 0.01f * f);
+            if (sc == goal) pick = true;
+            t.Sprite.Scale = baseScale * sc;
         }
+        if (beam != null) beam.QueueFree();
+        float end = ok ? 0 : 1;
+        while (sc != end) { float f = await Frames(); sc = ok ? Math.Max(0, sc - 0.01f * f) : Math.Min(1, sc + 0.01f * f); t.Sprite.Scale = baseScale * sc; }
+        GameAudio.Se(212);
+        if (ok) { t.Down = true; t.Sprite.Visible = false; t.Bar.Visible = false; t.Tag.Visible = false; }
+        t.Sprite.Scale = baseScale;
+        while (cs > 0) { cs = Math.Max(0, cs - 0.025f * await Frames()); if (card != null) card.Scale = baseScale * cs; }
+        card?.QueueFree();
+    }
+
+    /// <summary>等一帧，返回这一帧折合官方多少帧（60 帧/秒，乘播放速度）。</summary>
+    private async Task<float> Frames()
+    {
+        await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        return Math.Max(0.01f, (float)GetProcessDeltaTime() * 60f * Speed);
     }
 
     /// <summary>技能/魔法的名字：自己和宠物会的技能里找，找不到就叫"技能"。</summary>

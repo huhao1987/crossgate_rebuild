@@ -59,7 +59,9 @@ public partial class NetSeal : SceneTree
                 if (b.SealsShown > 0 || !s.InBattle) { _st = 5; _f = 0; }
                 if (_f > 3000) { Check(false, "没播封印动画"); return End(); }
                 break;
-            case 5 when !s!.InBattle && !b.Visible || _f > 1200:
+            case 5 when _f == 61:
+                Root.GetTexture().GetImage().SavePng("res://test/out_seal_61.png"); break;
+            case 5 when !s!.InBattle && !b.Busy || _f > 1800:
                 Check(b.SealsShown > 0, $"播了封印动画（{b.SealsShown} 次）");
                 Check(!s!.InBattle, "抓到后战斗结束");
                 _st = 6; _f = 0; break;
