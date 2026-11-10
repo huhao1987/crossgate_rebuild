@@ -1041,6 +1041,8 @@ public partial class BattleUi : CanvasLayer
         {
             if (!_units.TryGetValue(e0.TargetId, out var t0)) return;
             var dir = a.Sprite.Dir;
+            PlayEffectAnime(a, 110008);   // 物理技出手前施法者身上一阵细光线（官方实拍连击、气功弹都有）
+            await Wait(0.35);
             var to = a.Home + (t0.Home - a.Home) * 0.72f;
             a.Sprite.Act = RunAct(a.Sprite); a.Sprite.ZIndex = 1;
             Float(a, name, Colors.Yellow);
@@ -1085,8 +1087,8 @@ public partial class BattleUi : CanvasLayer
     private async Task Hit(Unit a, Unit t, BattleEvent e, bool heal)
     {
         if (MagicEffect(e.TechId) is int fx) PlayEffectAnime(t, fx);
-        // 物理命中：官方 0x45dc3c 按攻击者的种类挑火花，其它情况一律 110001（黄白爆点）
-        else if (!e.Magic && !heal) PlayEffectAnime(t, 110001);
+        // 物理命中：官方 0x45dc3c 按攻击者正在用的技能挑火花（连击 110133，官方实拍），普攻一律 110001（黄白爆点）
+        else if (!e.Magic && !heal) PlayEffectAnime(t, HitSpark(e.Kind == CommandKind.Skill ? e.TechId : -1));
         else Effect(t, e.Magic ? (heal ? new Color(0.4f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f)) : Colors.White);
         if (heal)
         {
@@ -1151,6 +1153,18 @@ public partial class BattleUi : CanvasLayer
     }
 
     private static string Pad(string s, int cells) => s + new string(' ', Math.Max(0, cells - s.Sum(CgText.Cells)));
+
+    /// <summary>
+    /// 物理命中火花（exe 0x45dc3c，按技能编号 = 招式编号/100 挑）：0 连击 110133、1 110134、3/105 110135、5 110139、6 110137、
+    /// 75–80 110071、81 110174、84 110175、85 110159、87 110160、257/266 110476、258 110477、259 110470、260 110473、262 110475；其它 110001。
+    /// </summary>
+    public static int HitSpark(int techId) => techId < 0 ? 110001 : (techId / 100) switch
+    {
+        0 => 110133, 1 => 110134, 3 or 105 => 110135, 5 => 110139, 6 => 110137,
+        >= 75 and <= 80 => 110071, 81 => 110174, 84 => 110175, 85 => 110159, 87 => 110160,
+        257 or 266 => 110476, 258 => 110477, 259 => 110470, 260 => 110473, 262 => 110475,
+        _ => 110001,
+    };
 
     public static int? CastEffect(int techId)
     {
