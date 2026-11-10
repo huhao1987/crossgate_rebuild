@@ -1761,7 +1761,8 @@ public sealed class NetworkSession : IGameSession
                     if (!body[k].StartsWith('a') || !body[k + 1].StartsWith('d')) break;
                     int actor = Num(body[k]), tg = Num(body[k + 1]); long fl = Num(body[k + 2]); int dmg = Num(body[k + 3]);
                     bool killed = (fl & 0x20) != 0; if (killed) _down.Add(tg);
-                    ev.Add(new BattleEvent(_turn, actor, tech is 7300 or -1 ? CommandKind.Attack : CommandKind.Skill, tg, dmg, dmg == 0, killed, false, tech));
+                    // 标志位 0x2 = 会心一击（官方：目标身上 110008 + "Critical" 22454，exe 0x45f181）
+                    ev.Add(new BattleEvent(_turn, actor, tech is 7300 or -1 ? CommandKind.Attack : CommandKind.Skill, tg, dmg, dmg == 0, killed, false, tech, Critical: (fl & 2) != 0 && dmg > 0));
                 }
             }
         }

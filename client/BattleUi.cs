@@ -1098,7 +1098,11 @@ public partial class BattleUi : CanvasLayer
     {
         if (MagicEffect(e.TechId) is int fx) PlayEffectAnime(t, fx);
         // 物理命中：官方 0x45dc3c 按攻击者正在用的技能挑火花（连击 110133，官方实拍），普攻一律 110001（黄白爆点）
-        else if (!e.Magic && !heal) PlayEffectAnime(t, HitSpark(e.Kind == CommandKind.Skill ? e.TechId : -1));
+        else if (!e.Magic && !heal)
+        {
+            PlayEffectAnime(t, HitSpark(e.Kind == CommandKind.Skill ? e.TechId : -1));
+            if (e.Critical) { PlayEffectAnime(t, 110008); Tag(t, 22454); }   // 会心一击（标志 0x2）
+        }
         else Effect(t, e.Magic ? (heal ? new Color(0.4f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f)) : Colors.White);
         if (heal)
         {
@@ -1238,6 +1242,7 @@ public partial class BattleUi : CanvasLayer
             Damage(t, e.Damage, 0);
             Flash(t.Sprite);
             PlayEffectAnime(t, 110001);   // 命中火花（官方 0x45dc3c 默认 110001）
+            if (e.Critical) { PlayEffectAnime(t, 110008); Tag(t, 22454); }   // 会心一击
             var hurt = PlayOnce(t.Sprite, Cfg.ActHurt);
             var knock = (t.Home - a.Home).Normalized() * 14;
             var tw = t.Sprite.CreateTween().SetSpeedScale(Speed);

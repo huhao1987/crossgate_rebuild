@@ -37,7 +37,7 @@ public sealed record Command(CommandKind Kind, int TargetId = -1, int Arg = -1, 
 /// <summary>TechId：招式编号（联网 SKL 的 s 段，-1 = 不知道）；Magic：魔法类（施法者原地不动）；Heal：回复（Damage 是回复量）。</summary>
 /// <summary>Sealed：封印（抓宠）—— null 不是封印，true 抓到了，false 没抓到。</summary>
 /// <summary>Combo：合击（CMB）同一组的编号（0 = 不是合击）；Text：战斗中的系统话（CHT）/ 召唤出来的宠物名字（MON）。</summary>
-public sealed record BattleEvent(int Turn, int ActorId, CommandKind Kind, int TargetId, int Damage, bool Missed, bool Killed, bool Escaped, int TechId = -1, bool Magic = false, bool Heal = false, bool? Sealed = null, int Combo = 0, string? Text = null);
+public sealed record BattleEvent(int Turn, int ActorId, CommandKind Kind, int TargetId, int Damage, bool Missed, bool Killed, bool Escaped, int TechId = -1, bool Magic = false, bool Heal = false, bool? Sealed = null, int Combo = 0, string? Text = null, bool Critical = false);
 
 public enum BattleOutcome { Ongoing, Win, Lose, Escaped }
 
