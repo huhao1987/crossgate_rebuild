@@ -2180,6 +2180,9 @@ public sealed class NetworkSession : IGameSession
     {
         if (f.Length < 5) return;
         int type = D62Safe(f[0]), mask = D62Safe(f[1]);   // 两个都是 62 进制：是/否窗口的按钮掩码是 "c"（= 12 = 是 4 + 否 8）
+        // 官方 exe 每帧分派表（0x432c0c）里这几种和别的种类共用同一个处理函数：33/34 = 银行 23，42 = 宠物学技能 24，44 = 选技能栏 26
+        //（实测 TechshopEX 李道特 59801 121,121 弹 42，数据格式和 24 一样）
+        type = type switch { 33 or 34 => 23, 42 => 24, 44 => 26, _ => type };
         if (type == 23) { OnBank(f); return; }   // 银行（保险箱）窗口，见 OnBank
         _window = new Window(type, mask, f[2], f[3]);
         if (type is 17 or 18) { OnSkillShop(type, string.Join(' ', f.Skip(4)).Split('|')); return; }
