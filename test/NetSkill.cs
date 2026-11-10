@@ -57,7 +57,7 @@ public partial class NetSkill : SceneTree
             case 8 when _mid && _midF > 0 && _f == _midF + 16: Shot("4b_fly"); break;
             case 8 when _mid && _midF > 0 && _f == _midF + 50: Shot("5_fx"); break;
             case 8 when _f == 360:
-                Check(b.SkillsPlayed > 0, $"技能动画播了 {b.SkillsPlayed} 组（事件 {b.PlayedEvents}）");
+                Check(b.SkillsPlayed > 0, $"技能动画播了 {b.SkillsPlayed} 组（事件 {b.PlayedEvents}，闪屏 {b.FlashesShown}）");
                 var log = string.Join("\n", Directory.GetFiles("/home/claude/wine/cgmsv/log", "packet_*.txt").OrderBy(x => x).TakeLast(1).SelectMany(File.ReadLines).Where(l => l.Contains("\ttest1\t") && string.CompareOrdinal(l[..8], _since) >= 0));
                 Check(log.Contains($"Rg S|{_skill}|0|"), $"服务端收到技能指令 Rg S|{_skill}|0|目标");
                 if (_skill == 2) Check(b.EffectsPlayed > 0, $"陨石播了官方特效动画（{b.EffectsPlayed} 次）");

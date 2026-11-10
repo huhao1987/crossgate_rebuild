@@ -35,6 +35,38 @@ public partial class BattleUi : CanvasLayer
 
     private Control _root = null!;
     private Node2D _stage = null!;
+    private ColorRect _flash = null!;
+    /// <summary>
+    /// 魔法闪屏（exe 0x45f530）：整屏盖一层调色板色、透明度 0xa0；颜色 = 表 0x49a7c8[行×16 + t]，t 每帧 +1 到 15 再每帧 −1 回 0。
+    /// 行 = 魔法特效表的行（0 陨石 1 冰冻 2 火焰 3 风刃 4/5 回复 6 风 7 吸血；第 4、7 行几种颜色交替，所以闪烁，官方吸血魔法实拍是红蓝交替）。
+    /// </summary>
+    private static readonly byte[] FlashTable =
+    {
+        101, 101, 102, 102, 103, 103, 104, 104, 105, 105, 106, 106, 107, 107, 108, 108,
+        131, 131, 132, 132, 133, 133, 134, 134, 135, 135, 136, 136, 137, 137, 138, 138,
+        222, 222, 223, 223, 224, 224, 225, 225, 226, 226, 227, 227, 228, 228, 229, 229,
+        74, 74, 75, 75, 76, 76, 77, 77, 79, 79, 80, 80, 81, 81, 82, 82,
+        137, 229, 137, 229, 137, 229, 137, 229, 137, 229, 137, 229, 137, 229, 137, 229,
+        165, 165, 165, 165, 166, 166, 166, 166, 167, 167, 167, 167, 168, 168, 168, 168,
+        74, 74, 75, 75, 76, 76, 77, 77, 79, 79, 80, 80, 81, 81, 82, 82,
+        217, 173, 1, 0, 214, 173, 1, 0, 211, 173, 1, 0, 208, 173, 1, 0,
+    };
+    public int FlashesShown { get; private set; }
+    private async Task Flash(int row)
+    {
+        if (row < 0 || row > 7) return;
+        FlashesShown++;
+        var pal = Cache.Library.PaletteFor(Cache.PaletteNo);
+        _flash.Visible = true;
+        for (int step = 0; step < 32; step++)
+        {
+            int t = step < 16 ? step : 31 - step;
+            uint v = pal.Colors[FlashTable[row * 16 + t]];
+            _flash.Color = new Color(((v >> 16) & 255) / 255f, ((v >> 8) & 255) / 255f, (v & 255) / 255f, 0xa0 / 255f);
+            await Frames();
+        }
+        _flash.Visible = false;
+    }
     private Label _status = null!, _log = null!;
     private sealed class Unit
     {
@@ -71,6 +103,8 @@ public partial class BattleUi : CanvasLayer
         _root.AddChild(_grid);
         _stage = new Node2D { YSortEnabled = true };
         _root.AddChild(_stage);
+        _flash = new ColorRect { AnchorRight = 1, AnchorBottom = 1, MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
+        _root.AddChild(_flash);
         _status = new Label { Position = new Vector2(24, 16) };
         _status.AddThemeFontSizeOverride("font_size", 20);
         _root.AddChild(_status);
@@ -1078,6 +1112,7 @@ public partial class BattleUi : CanvasLayer
         // 魔法：原地施法
         // 回复类魔法施法时，施法者身上一阵往上的光条（exe 0x46df14 = 0x1ae04 − 档位：110084…110081，官方实拍补血 LV1）
         if (CastEffect(e0.TechId) is int cfx) PlayEffectAnime(a, cfx);
+        if (MagicRow(e0.TechId) is int frow and >= 0) _ = Flash(frow);   // 攻击魔法 / 吸血施法时闪屏
         await PlayOnce(a.Sprite, a.Sprite.HasAct(Cfg.ActMagic) ? Cfg.ActMagic : Cfg.ActAttack);
         a.Sprite.Act = Cfg.ActStand;
         var hits = new List<Task>();
@@ -1157,9 +1192,17 @@ public partial class BattleUi : CanvasLayer
     /// 招式编号 → 特效动画。服务端 tech.txt：陨石/冰冻/火焰/风刃 = 技能 19–22，强力 23–26，超强 27–30，
     /// 招式编号 = 技能×100 + 等级−1（宠物版从 16 开始：1916 = 宠物陨石 LV1）。
     /// </summary>
+    /// <summary>闪屏 / 特效表的行：攻击魔法 0–3、吸血魔法（技能 31）7；回复类不闪。</summary>
+    public static int MagicRow(int techId)
+    {
+        int skill = techId / 100;
+        return skill is >= 19 and <= 30 ? (skill - 19) % 4 : skill == 31 ? 7 : -1;
+    }
+
     public static int? MagicEffect(int techId)
     {
         int skill = techId / 100, n = techId % 100;
+        if (skill == 31) return 114177;   // 吸血魔法：特效表 0x49a838 第 7 行四档都是 114177
         int row = skill is >= 19 and <= 30 ? (skill - 19) % 4 : skill is >= 61 and <= 63 ? 4 : skill is >= 64 and <= 66 ? 5 : -1;
         if (row < 0) return null;
         int lv = n >= 16 ? n - 15 : n + 1;
