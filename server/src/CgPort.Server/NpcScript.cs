@@ -131,6 +131,8 @@ public sealed record DialogPage(string Text, IReadOnlyList<string> Buttons, bool
     /// <summary>两个输入框的窗口（BZ 35，exe 0x422c78 参数 2，成立家族"家族名称 / 家族会馆名称"）：框在窗口 (120,102) / (120,164)，各 24 字节；
     /// 按钮发 "按钮 转义后的 名1|名2"（exe "%s|%s" → 0x478bbb 转义）；有一个空着就不发（音效 55）。</summary>
     public bool Input2 { get; init; }
+    /// <summary>交出物品（BZ 31）：要交几个。</summary>
+    public int Need { get; init; }
     public string SourceName { get; init; } = "";
 }
 

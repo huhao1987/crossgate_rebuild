@@ -9,6 +9,7 @@ namespace CgPort.Godot.Tests;
 /// </summary>
 public partial class NetWinMisc : SceneTree
 {
+    int _face1; string _since = "";
     int _f, _st; Main _m = null!; CgPort.Server.DialogPage? _page; bool _hook;
     readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
@@ -56,7 +57,46 @@ public partial class NetWinMisc : SceneTree
                 _m.DialogUi.InputBox!.Text = "家名"; _m.DialogUi.EmitSignal(DialogPanel.SignalName.ButtonPressed, "ok");
                 Check(_m.DialogUi.Visible, "第二个框空着点确定 → 不发、窗口还在");
                 _m.DialogUi.EmitSignal(DialogPanel.SignalName.ButtonPressed, "cancel");
+                _page = null; s!.Say("/dolua gm_win.lua 31 0 14003|交换银|x|a|请把银子交给我。|c|d|x|9602|银|这是银|3|0|5|0"); _st = 6; _f = 0; break;
+            // 交出物品（BZ 31）：兑换窗口一格，需 3 个、持有 5 个
+            case 6 when _page?.Kind == "handin" && _f > 20:
+            {
+                var w = _m.Shop;
+                Check(w.Visible && w.HandIn && _page.Shop!.Count == 1 && _page.Need == 3 && _page.SourceItem == 5 && _page.Text.Contains("银子"), $"交出物品（31）：{_page.Shop![0].Name} 需 {_page.Need} 持有 {_page.SourceItem}「{_page.Text}」");
+                for (int k = 0; k < 6; k++) w.Add(0, +1);
+                Check(w.Qty(0) == 3, $"▲ 最多到需要的 3 个：{w.Qty(0)}");
+                Shot("5_handin"); w.Cancel();
+                _page = null; s!.Say("/dolua gm_win.lua 36 12 14003|NPC|x"); _st = 7; _f = 0; break;
+            }
+            // 改脸（BZ 36）：眼睛、嘴巴各 ▶ 一下 → 是 → 发新头像号
+            case 7 when _page?.Kind == "face" && _f > 20:
+            {
+                var fw = _m.FaceUi!; int f0 = fw.Face;
+                fw.Step(1, +1); fw.Step(2, +1);
+                Check(fw.Visible && f0 > 0 && fw.Face == f0 - f0 % 25 + ((f0 % 25 / 5 + 1) % 5) * 5 + (f0 % 5 + 1) % 5, $"改脸窗口：{f0} → {fw.Face}");
+                Shot("6_face"); _face1 = fw.Face; _since = DateTime.Now.ToString("HH:mm:ss"); fw.Yes(); _st = 8; _f = 0; break;
+            }
+            case 7 when _f > 300: Check(false, $"改脸窗口没出来（{_page?.Kind}）"); GD.Print(string.Join("\n", _r)); return true;
+            case 8 when _f == 60:
+            {
+                var log = string.Join("\n", Directory.GetFiles("/home/claude/wine/cgmsv/log", "packet_*.txt").OrderBy(x => x).TakeLast(1).SelectMany(File.ReadLines).Where(l => l.Contains("\ttest1\t") && l.Contains("xD")).TakeLast(3));
+                Check(log.Contains($" 4 {_face1}"), $"是 → 发 xD … 4 {_face1}：{log.Split('\n').LastOrDefault()}");
+                _page = null; s!.Say("/dolua gm_win.lua 37 12 7|hello"); _st = 9; _f = 0; break;
+            }
+            // 37：是 / 否窗口，按钮带回第一段的数（官方实拍 "7|world" 点否发 "8 7"）
+            case 9 when _page != null && _f > 20:
+                Check(_m.DialogUi.Visible && _page.Text.Trim() == "hello", $"37 窗口：「{_page.Text.Trim()}」 [{string.Join(",", _page.Buttons)}]");
+                _m.DialogUi.EmitSignal(DialogPanel.SignalName.ButtonPressed, "no"); _st = 10; _f = 0; break;
+            case 9 when _f > 300: Check(false, "37 窗口没出来"); _st = 10; _f = 0; break;
+            case 10 when _f == 60:
+            {
+                var log = string.Join("\n", Directory.GetFiles("/home/claude/wine/cgmsv/log", "packet_*.txt").OrderBy(x => x).TakeLast(1).SelectMany(File.ReadLines).Where(l => l.Contains("\ttest1\t") && l.Contains("xD")).TakeLast(1));
+                Check(log.TrimEnd().EndsWith(" 8 7"), $"否 → 发 xD … 8 7：{log}");
+                _st = 12; _f = 0; break;
+            }
+            case 12 when _f == 30:
                 GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true;
+            case 6 when _f > 300: Check(false, $"交出物品没出来（{_page?.Kind}）"); GD.Print(string.Join("\n", _r)); return true;
             case 5 when _f > 300: Check(false, "两个输入框的窗口没出来"); GD.Print(string.Join("\n", _r)); return true;
             case 4 when _f > 300: Check(false, "输入窗口没出来"); GD.Print(string.Join("\n", _r)); return true;
         }

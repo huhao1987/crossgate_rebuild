@@ -62,6 +62,10 @@ public partial class Main : Node2D
     public ItemPanel ItemsUi => _items;
     private TradePicker _itemMember = null!;
     private ItemTargetWindow _itemTarget = null!;
+    private TradePicker? _disguise;
+    private FaceWindow? _face;
+    public FaceWindow? FaceUi => _face;
+    public TradePicker? DisguiseUi => _disguise;
     public TradePicker ItemMemberUi => _itemMember;
     public ItemTargetWindow ItemTargetUi => _itemTarget;
     public BankWindow BankUi => _bank;
@@ -322,6 +326,8 @@ public partial class Main : Node2D
         _session.RewardsGained += OnRewards;
         _session.DialogChanged += p =>
         {
+            _face?.ShowPage(p?.Kind == "face" ? p : null);
+            if (p?.Kind == "face") { _dialog.ShowPage(_talkingTo, null); return; }
             bool heal = p?.Kind == "heal", board = p?.Kind == "board", petShop = p?.Kind is "petskill" or "petpick" or "petslot", bury = p?.Kind == "bury", shop = p?.Shop != null && !heal && !board && !petShop, menu = p?.Kind is "shop" or "skillmenu" or "trademenu" or "givemenu";
             _shop.ShowPage(shop ? p : null);
             _heal.ShowPage(heal ? p : null);
@@ -443,6 +449,13 @@ public partial class Main : Node2D
             nsI.ItemTargetRequested += list => _itemTarget.Show(list);
             _itemTarget.Picked += c => { if (nsI.Treating && _prod != null) _prod.TreatName = _itemTarget.Shown.FirstOrDefault(t => t.Code == c)?.Name ?? ""; nsI.UseItemOn(c); };
             _itemTarget.Back += () => _itemMember.Show(nsI.ItemMembers());
+            nsI.DisguiseTargetsRequested += names =>
+            {
+                if (names.Count == 0) { _toast.Show("没有可变装的角色。", 2); return; }
+                _disguise ??= new TradePicker { Cache = _cache };
+                if (_disguise.GetParent() == null) { AddChild(_disguise); _disguise.Picked += _ => { }; }
+                _disguise.Show(names);
+            };
         }
         _prod = new ProductionUi { Cache = _cache, Session = () => _session as NetworkSession, PlayerAnime = () => _player.AnimeId };
         AddChild(_prod);
@@ -555,6 +568,9 @@ public partial class Main : Node2D
             else _session.Answer(b);
         };
         // 商店买 / 卖（官方专用窗口，见 ShopTrade.cs）；「取消」官方不发包，只关窗口
+        _face = new FaceWindow { Cache = _cache, CurrentFace = () => (_session as NetworkSession)?.FaceImage ?? 0 };
+        _face.Submit = (b, data) => { if (_session is NetworkSession nsf) { nsf.AnswerWith(b, data); if (b == "yes" && int.TryParse(data, out var nf)) nsf.FaceImage = nf; } };
+        AddChild(_face);
         _shop = new ShopTradeWindow { Cache = _cache, StandAct = _cfg.ActStand, Gold = () => _session.Player.Gold, FreeSlots = () => 20 - _session.Player.Items.Count(i => i.Slot is >= 8 and < 28) };
         _shop.CountOf = id => _session.Player.Items.Where(i => i.ItemId == id && i.Slot is >= 8 and < 28).Sum(i => Math.Max(1, i.Count));
         _shop.Submit = a => { if (a != "cancel") _session.Answer(a); else (_session as NetworkSession)?.WindowClose(); };

@@ -520,10 +520,12 @@ public sealed class NetworkSession : IGameSession
     public event Action<IReadOnlyList<CharSlot?>>? CharListReceived;
     public event Action<string>? CharCreateFailed;
     private int _chosenSlot = -1;
+    /// <summary>自己的头像图号（登录时选的角色；改脸窗口 BZ 36 确认后跟着改）。</summary>
+    public int FaceImage { get; set; }
     public void EnterChar(int pos)
     {
         if (CharSlots.ElementAtOrDefault(pos) is not { } c) return;
-        _chosenSlot = pos; Player.Name = c.Name; Player.Level = c.Level;
+        _chosenSlot = pos; Player.Name = c.Name; Player.Level = c.Level; FaceImage = c.Face;
         Status?.Invoke($"进入角色 {c.Name}…");
         Send("emRV", B62(c.RegNo), pos.ToString(), B62(c.Face));
     }
@@ -563,7 +565,7 @@ public sealed class NetworkSession : IGameSession
             var name = chars[i]; var parts = chars[i + 1].Split("\\\\z");
             if (parts.Length < 15) continue;
             Player.Name = Unesc(name);
-            Player.Level = int.TryParse(parts[2], out var lv) ? lv : 1;
+            Player.Level = int.TryParse(parts[2], out var lv) ? lv : 1; FaceImage = int.TryParse(parts[1], out var fc) ? fc : 0;
             Status?.Invoke($"进入角色 {Player.Name}…");
             Send("emRV", B62(long.Parse(parts[14])), parts[0], B62(long.Parse(parts[1])));   // 角色列表里注册号是十进制，CharLogin 要 62 进制（实测）
             return;
@@ -2139,6 +2141,8 @@ public sealed class NetworkSession : IGameSession
     public event Action<IReadOnlyList<string>>? ItemMemberRequested;
     /// <summary>nFV：要选具体对象。</summary>
     public event Action<IReadOnlyList<ItemTarget>>? ItemTargetRequested;
+    /// <summary>BZ 15：变装要选的对象名单。</summary>
+    public event Action<IReadOnlyList<string>>? DisguiseTargetsRequested;
     public IReadOnlyList<string> ItemMembers() => InParty ? _party.Values.Select(m => m.Name).ToList() : new List<string> { Player.Name };
     public void SelectItemMember(int index) { _usingMember = index; Send(_treating ? "McVa" : "mjCv", index.ToString()); }
     public void UseItemOn(int target)
@@ -2195,8 +2199,36 @@ public sealed class NetworkSession : IGameSession
         _window = new Window(type, mask, f[2], f[3]);
         if (type is 17 or 18) { OnSkillShop(type, string.Join(' ', f.Skip(4)).Split('|')); return; }
         if (type == 32) { GuildBeastChanged?.Invoke(ParseGuildBeast(string.Join(' ', f.Skip(4)))); return; }
+        // 改脸（exe 解析 0x42284b、画 0x431b81；官方 gm_win 实拍）：数据 头像|NPC名|话；窗口画自己的头像、脸部 / 眼睛 / 嘴巴 ◀▶，
+        // 是 → xD … 是 新头像图号（实测眼睛、嘴巴各 +1：241400 → 241406）。
+        if (type == 36)
+        {
+            var q36 = string.Join(' ', f.Skip(4)).Split('|');
+            DialogChanged?.Invoke(new DialogPage(q36.Length > 2 ? Unesc(q36[2]) : "", WindowText.ButtonNames(mask), true) { Kind = "face", NpcName = q36.Length > 1 ? Unesc(q36[1]) : "" });
+            return;
+        }
+        // 变装选对象（exe 解析 0x41f68a、画 0x425384）：数据 = 名字|名字|…，一行一个；空着显示"没有可变装的角色。"。
+        // 点一行发当前技能的 sM（变装技能的流程）；没有技能上下文时只关窗口（官方 gm_win 实拍：不发包）。
+        if (type == 15)
+        {
+            var names15 = string.Join(' ', f.Skip(4)).Split('|').Select(Unesc).Where(n => n.Length > 0).ToList();
+            _window = null;
+            DisguiseTargetsRequested?.Invoke(names15);
+            return;
+        }
+        // 选使用对象（exe 解析 0x41f830、画 0x42590c）：每个对象 7 段 名字|等级|受伤|生命|最大生命|魔力|最大魔力（跟急救的 ND 同格式）；
+        // 数据空 = 自己 + 自己的宠物。就是用道具 / 急救时那个"请选择使用对象"窗口（官方 gm_win 实拍一样）。
+        if (type == 14)
+        {
+            var body14 = string.Join(' ', f.Skip(4)).Trim();
+            if (body14.Length > 0) OnTreatTargets(body14); else ItemTargetRequested?.Invoke(ItemTargets());
+            return;
+        }
         var data = string.Join(' ', f.Skip(4));
         int bar = data.IndexOf('|');
+        // 37（exe 0x4228e3 读）：数|话，就是一个普通的是 / 否窗口，但点按钮时把第一段的数原样带回（官方实拍：
+        // gm_win 37 12 "5|hello" 点是发 "xD … 4 5"，"7|world" 点否发 "… 8 7"）
+        _w37 = type == 37 && bar >= 0 ? data[..bar].Trim() : "";
         int? header = null;
         if (bar >= 0 && int.TryParse(data[..bar].Replace("\\S", "").Trim(), out var h)) { header = h; data = data[(bar + 1)..]; }
         DialogPage page;
@@ -2308,6 +2340,18 @@ public sealed class NetworkSession : IGameSession
             var d = string.Join(' ', f.Skip(4)).Split('|');
             page = new DialogPage("", new List<string> { "cancel" }, false) { Kind = "bury", SourceItem = int.TryParse(d[0].Trim(), out var ex) ? ex : -1 };
         }
+        else if (type == 31)
+        {
+            // 交出物品（exe 0x420e66 读、0x42aa2d 画；官方 gm_win 实拍 = 兑换那个窗口只有一格）：
+            // 1 头像|2 NPC名|3 ?|4–7 四句话（第 5 句在对话框里）|8 ?|9 道具图|10 道具名|11 说明|12 要交几个(需)|13 ?|14 持有几个(已)|15 ?
+            // ▲▼ 选数量 → 确认"交出 %s  %d  个。"→ 发 "1|数量"（exe "%d|%d"）。
+            var q = string.Join(' ', f.Skip(4)).Split('|');
+            string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n").Trim('\n') : "";
+            int N(int i) => i < q.Length && int.TryParse(q[i].Trim(), out var v) ? v : 0;
+            var list = T(9).Length > 0 ? new List<ShopEntry> { new(T(9), N(8), 1, T(10), 0, -1, 1) } : new List<ShopEntry>();
+            page = new DialogPage(T(4), new List<string> { "cancel" }, false)
+            { Kind = "handin", Shop = list, AltTexts = new[] { T(3), T(5), T(6) }, NpcName = T(1), Face = N(0), SourceItem = N(13), SourceName = T(9), Need = N(11) };
+        }
         else if (type == 28)
         {
             // 兑换（Brushman「想交易」之后，exe 0x420881 读、0x428ff6 画）：头像|NPC名|话|数量不足的话|物品栏满的话|拿来换的道具编号|它的名字|
@@ -2363,6 +2407,7 @@ public sealed class NetworkSession : IGameSession
         DialogChanged?.Invoke(page);
     }
 
+    private string _w37 = "";
     public void Answer(string button)
     {
         if (_window == null) return;
@@ -2385,6 +2430,10 @@ public sealed class NetworkSession : IGameSession
                 ? string.Concat(items.Select(x => $"{x[0]}\\\\z{x[1]}\\\\z"))
                 : string.Join("\\\\z", items.Select(x => $"{x[0]}\\\\z{x[1]}"));
         }
+        else if (button.StartsWith("handin:"))
+        {
+            sel = "1\\z" + button[7..];   // 交出物品："1|数量"
+        }
         else if (button.StartsWith("swap:"))
         {
             // 兑换："序号|数量|序号|数量"，| 转义成 \\z，结尾不带
@@ -2396,7 +2445,7 @@ public sealed class NetworkSession : IGameSession
             sel = string.Concat(button[5..].Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => $"{x}\\\\z"));
         }
         else if (button.StartsWith("data:")) sel = button[5..];   // 原样数据（买卖列表等），字段内的 \\z 已由调用方写好
-        else btn = B62(WindowButtons.FirstOrDefault(b => b.Name == button).Bit);   // 按钮值也是 62 进制：下一页 32 发 "w"（官方抓包），发 "32" 服务端不理
+        else { btn = B62(WindowButtons.FirstOrDefault(b => b.Name == button).Bit); if (w.Type == 37) sel = _w37; }   // 按钮值也是 62 进制：下一页 32 发 "w"（官方抓包），发 "32" 服务端不理
         Send("xD", B62(X), B62(Y), w.Seq, w.ObjId, btn, sel);
         DialogChanged?.Invoke(null);   // 服务端如果还有下一页，会再发 BZ
     }
