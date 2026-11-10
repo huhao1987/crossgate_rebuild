@@ -75,12 +75,7 @@ public partial class ShopTradeWindow : CgWindow
         // 话按 20 字节折行（exe 0x40f581 用的 [0x119e9f4]，商店入口读完就设成 0x14）；鉴定 / 修理的话是客户端自己的（开头带空行，官方照样空一行）
         var lines = said.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0 || (Picking && _hover < 0)).SelectMany(l => l.Length == 0 ? new List<string> { "" } : ShopMenuWindow.Wrap(l, 20)).Take(_hover >= 0 ? 8 : 5).ToList();
         for (int k = 0; k < lines.Count; k++) Txt(lines[k], 378, 54 + 21 * k, Colors.White);
-        if (_page.Face > 0)
-        {
-            var holder = new Node2D { Position = new Vector2(468, 244) };
-            holder.AddChild(new AnimSprite { Cache = Cache, AnimeId = _page.Face, Act = StandAct, FallbackAct = StandAct, Dir = 5 });
-            Body.AddChild(holder);
-        }
+        NpcFigure.Add(Body, Cache, new Vector2(468, 244), _page.Face, StandAct, 5);
         Txt($"{_pageNo + 1}/{Pages}", 189, 50, Colors.White, center: true);
         CBtn(23022, 23026, 147, 52, () => Turn(-1), "切换页数。");
         CBtn(23023, 23027, 226, 52, () => Turn(1), "切换页数。");
@@ -220,7 +215,8 @@ public partial class ShopTradeWindow : CgWindow
     {
         if (_page?.Shop is not { } list) return;
         // 确认框画在屏幕正中 640×408（相对本窗口 (192,132) 的偏移是 (−32,24)）
-        var box = new Control { Position = new Vector2(160 - 192, 156 - 132), Size = new Vector2(640, 408), MouseFilter = Control.MouseFilterEnum.Stop };
+        // 窗口 10×8 格：位置按 640×408 居中算（exe 0x4240a8），但九宫格一格 64×48，画出来只有 640×384（官方实拍 2026-11-10 量的）
+        var box = new Control { Position = new Vector2(160 - 192, 156 - 132), Size = new Vector2(640, 384), MouseFilter = Control.MouseFilterEnum.Stop };
         Body.AddChild(box); _confirmBox = box;
         box.AddChild(new ColorRect { Position = new Vector2(4, 4), Size = box.Size - new Vector2(8, 8), Color = new Color(0, 0, 58 / 255f, 0.55f), MouseFilter = Control.MouseFilterEnum.Ignore });
         box.AddChild(new CgFrame { Cache = Cache, Size = box.Size, MouseFilter = Control.MouseFilterEnum.Ignore });
@@ -237,7 +233,8 @@ public partial class ShopTradeWindow : CgWindow
             box.AddChild(new CgText { Wrap = 999, Text = $"{_page.SourceName} {CountOf(_page.SourceItem),8} 个    交换个数 {Total(),8} 个", FontColor = Colors.White, Position = new Vector2(120, 257) });
         else box.AddChild(new CgText { Wrap = 999, Text = $"持有金额 {Gold(),9} 金币    {(Picking ? (Judge ? "鉴定" : "修理") : Buying ? "购买" : "卖出")}金额 {Total(),9} 金币", FontColor = Colors.White, Position = new Vector2(120, 257) });
         box.AddChild(new CgText { Text = $"{(Exchanging ? "交易" : Picking ? (Judge ? "鉴定" : "修理") : Buying ? "购买" : "卖出")}以上物品，可以吗？", FontColor = Colors.White, Position = new Vector2(215, 301) });
-        foreach (var (label, x, act) in new (string, float, Action)[] { ("  是  ", 143, Yes), ("  否  ", 313, No) })
+        // 官方实拍（2026-11-10）：是 字左缘 204、否 418（相对确认框）
+        foreach (var (label, x, act) in new (string, float, Action)[] { ("  是  ", 187, Yes), ("  否  ", 401, No) })
         {
             box.AddChild(new CgText { Text = label, FontColor = new Color(1, 1, 0.4f), Position = new Vector2(x, 341) });
             var h = new Control { Position = new Vector2(x - 4, 334), Size = new Vector2(64, 22), MouseFilter = Control.MouseFilterEnum.Stop };

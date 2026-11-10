@@ -365,3 +365,23 @@ public static class ExeArt
         return _tex[key] = im == null ? null : ImageTexture.CreateFromImage(im);
     }
 }
+
+/// <summary>
+/// 商店 / 技能店这类窗口里站着的 NPC（官方 0x44bbaf）：头像段的编号 ≥ 100000 是动画（站立动作、指定方向），
+/// 小于的是一张图（14089 这种，按图本身的偏移贴在落脚点）。官方实拍：药剂师波洛姆（14089）站在窗口里的地板上。
+/// </summary>
+public static class NpcFigure
+{
+    public static void Add(Control parent, TextureCache cache, Vector2 at, int face, int standAct, int dir)
+    {
+        if (face <= 0) return;
+        if (face >= 100000)
+        {
+            var holder = new Node2D { Position = at };
+            holder.AddChild(new AnimSprite { Cache = cache, AnimeId = face, Act = standAct, FallbackAct = standAct, Dir = dir });
+            parent.AddChild(holder);
+        }
+        else if (cache.ImageNo(face) is (ImageTexture tex, var e) && e != null)
+            parent.AddChild(new TextureRect { Texture = tex, Position = at + new Vector2(e.OffsetX, e.OffsetY), MouseFilter = Control.MouseFilterEnum.Ignore });
+    }
+}

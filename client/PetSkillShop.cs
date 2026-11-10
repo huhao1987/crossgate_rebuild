@@ -52,12 +52,7 @@ public partial class PetSkillShopWindow : CgWindow
         var said = Message == 0 || Page.AltTexts == null ? Page.Text : Page.AltTexts[Message - 1];
         var lines = said.Split('\n').SelectMany(l => l.Length == 0 ? new List<string> { "" } : ShopMenuWindow.Wrap(l, 20).ToList()).Take(5).ToList();
         for (int k = 0; k < lines.Count; k++) Txt(lines[k], 378, 64 + 20 * k, Colors.White);
-        if (Page.Face > 0)
-        {
-            var holder = new Node2D { Position = new Vector2(468, 244) };
-            holder.AddChild(new AnimSprite { Cache = Cache, AnimeId = Page.Face, Act = StandAct, FallbackAct = StandAct, Dir = 5 });
-            Body.AddChild(holder);
-        }
+        NpcFigure.Add(Body, Cache, new Vector2(468, 244), Page.Face, StandAct, 5);
         Txt(Gold().ToString(), 516, 292, Colors.White, right: true);
         if (Page.Kind == "petskill")
         {
@@ -177,7 +172,7 @@ public partial class PetSkillShopWindow : CgWindow
     private void BuildConfirm(IReadOnlyList<ShopEntry> list)
     {
         // 确认框 5×5 格（320×260）画在 ((W−320)/2,(H−264)/2) = (320,228)，相对本窗口 (128,96)
-        var box = new Control { Position = new Vector2(320 - 192, 228 - 132), Size = new Vector2(320, 260), MouseFilter = Control.MouseFilterEnum.Stop };
+        var box = new Control { Position = new Vector2(320 - 192, 228 - 132), Size = new Vector2(320, 240), MouseFilter = Control.MouseFilterEnum.Stop };
         Body.AddChild(box);
         box.AddChild(CgFrame.Tint(box.Size));
         box.AddChild(new CgFrame { Cache = Cache, Size = box.Size, MouseFilter = Control.MouseFilterEnum.Ignore, CenterAlpha = 0 });

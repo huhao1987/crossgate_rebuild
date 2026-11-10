@@ -29,7 +29,7 @@ public partial class HealWindow : CanvasLayer
         foreach (var c in GetChildren()) c.QueueFree();
         _win = null;
         if (Page?.Shop is not { } list) { Visible = false; return; }
-        var win = new Control { Position = new Vector2((960 - 448) / 2, (720 - 312) / 2), Size = new Vector2(448, 312) };
+        var win = new Control { Position = new Vector2((960 - 448) / 2, (720 - 312) / 2), Size = new Vector2(448, 288) };   // 7×6 格：位置按 448×312 居中，九宫格一格 64×48 → 画出来 448×288
         AddChild(win); _win = win;
         win.AddChild(new Control { Size = win.Size, MouseFilter = Control.MouseFilterEnum.Stop });
         win.AddChild(CgFrame.Tint(win.Size));

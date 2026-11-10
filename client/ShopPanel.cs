@@ -171,12 +171,7 @@ public partial class ShopMenuWindow : CgWindow
         if (_page is not { } p) return;
         Img(23050, 0, 0, block: true);
         Txt(p.NpcName, 145 + Ox, 8 + Oy + 6, Colors.White, center: true);
-        if (p.Face > 0)
-        {
-            var holder = new Node2D { Position = new Vector2(43 + Ox, 134 + Oy) };
-            holder.AddChild(new AnimSprite { Cache = Cache, AnimeId = p.Face, Act = StandAct, FallbackAct = StandAct, Dir = 3 });
-            Body.AddChild(holder);
-        }
+        NpcFigure.Add(Body, Cache, new Vector2(43 + Ox, 134 + Oy), p.Face, StandAct, 3);
         var lines = Wrap(p.Text.Replace("\n", ""), 26).Take(5).ToList();
         for (int k = 0; k < lines.Count; k++) Txt(lines[k], 97 + Ox, 44 + 21 * k + Oy + 6, Colors.White);
         // 同一个背景的三种入口：商店（BZ 5，0x423681）、技能导师（BZ 16，0x425e94：字 (150,157+24k)，点的范围 x 140–260）、
