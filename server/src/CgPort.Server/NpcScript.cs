@@ -128,6 +128,9 @@ public sealed record DialogPage(string Text, IReadOnlyList<string> Buttons, bool
     public int SourceItem { get; init; }
     /// <summary>输入窗口（BZ 11，exe 0x424ffc 参数 1）：文字下面有一行输入框，按钮发 "按钮 转义后的文字"。</summary>
     public bool Input { get; init; }
+    /// <summary>两个输入框的窗口（BZ 35，exe 0x422c78 参数 2，成立家族"家族名称 / 家族会馆名称"）：框在窗口 (120,102) / (120,164)，各 24 字节；
+    /// 按钮发 "按钮 转义后的 名1|名2"（exe "%s|%s" → 0x478bbb 转义）；有一个空着就不发（音效 55）。</summary>
+    public bool Input2 { get; init; }
     public string SourceName { get; init; } = "";
 }
 

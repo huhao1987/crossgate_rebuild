@@ -18,6 +18,7 @@ public partial class DialogPanel : CanvasLayer
     private const int LineH = 19;
     /// <summary>输入窗口的输入框（不是输入窗口时为 null）。</summary>
     public LineEdit? InputBox { get; private set; }
+    public LineEdit? InputBox2 { get; private set; }
 
     public override void _Ready()
     {
@@ -63,8 +64,24 @@ public partial class DialogPanel : CanvasLayer
         float y = 18;
         if (textLines > 0) { _win.AddChild(body); y += textLines * LineH; }
         // 输入窗口（BZ 11）：文字下面一行输入框
-        InputBox = null;
-        if (page.Input)
+        InputBox = null; InputBox2 = null;
+        if (page.Input2)
+        {
+            LineEdit Box(float by)
+            {
+                var sz = new Vector2(24 * CgText.CellW + 8, 20);
+                _win.AddChild(new ColorRect { Position = new Vector2(120, by), Size = sz, Color = new Color(0, 0, 0, 0.35f), MouseFilter = Control.MouseFilterEnum.Ignore });
+                var b = new LineEdit { Position = new Vector2(120, by), Size = sz, MaxLength = 12, Flat = true };
+                b.AddThemeColorOverride("font_color", Colors.White);
+                var clear = new StyleBoxEmpty();
+                b.AddThemeStyleboxOverride("normal", clear); b.AddThemeStyleboxOverride("focus", clear);
+                _win.AddChild(b);
+                return b;
+            }
+            InputBox = Box(102); InputBox2 = Box(164);
+            InputBox.CallDeferred(Control.MethodName.GrabFocus);
+        }
+        if (page.Input && !page.Input2)
         {
             InputBox = new LineEdit { Position = new Vector2(14, y), Size = new Vector2(w - 28, 20), MaxLength = 60, Flat = true };
             InputBox.AddThemeColorOverride("font_color", Colors.White);

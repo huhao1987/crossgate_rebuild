@@ -48,7 +48,16 @@ public partial class NetWinMisc : SceneTree
             case 4 when _page != null && _f > 20:
                 Check(_m.DialogUi.Visible && _m.DialogUi.InputBox != null, $"输入窗口：「{_page.Text.Trim()}」 输入框 {_m.DialogUi.InputBox != null} 按钮 [{string.Join(",", _page.Buttons)}]");
                 Shot("3_input"); _m.DialogUi.InputBox!.Text = "abc"; _m.DialogUi.EmitSignal(DialogPanel.SignalName.ButtonPressed, "cancel");
+                _page = null; s!.Say("/dolua gm_win.lua 35 3 请输入家族名称及会馆名称"); _st = 5; _f = 0; break;
+            // 成立家族那种两个输入框的窗口（BZ 35）
+            case 5 when _page != null && _f > 20:
+                Check(_m.DialogUi.Visible && _m.DialogUi.InputBox != null && _m.DialogUi.InputBox2 != null && _page.Input2, $"两个输入框的窗口（35）：框 {_m.DialogUi.InputBox != null}/{_m.DialogUi.InputBox2 != null}");
+                Shot("4_input2");
+                _m.DialogUi.InputBox!.Text = "家名"; _m.DialogUi.EmitSignal(DialogPanel.SignalName.ButtonPressed, "ok");
+                Check(_m.DialogUi.Visible, "第二个框空着点确定 → 不发、窗口还在");
+                _m.DialogUi.EmitSignal(DialogPanel.SignalName.ButtonPressed, "cancel");
                 GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true;
+            case 5 when _f > 300: Check(false, "两个输入框的窗口没出来"); GD.Print(string.Join("\n", _r)); return true;
             case 4 when _f > 300: Check(false, "输入窗口没出来"); GD.Print(string.Join("\n", _r)); return true;
         }
         return _f > 3000;

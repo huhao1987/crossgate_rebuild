@@ -193,6 +193,8 @@ public sealed class AnimeArchive : IDisposable
     public sealed record Action(int Dir, int Act, int DurationMs, int[] Frames, GraphicArchive? Set)
     {
         public ushort[] Sounds { get; init; } = Array.Empty<ushort>();
+        /// <summary>高版本动作：帧用这张图（地图编号）带的调色板；0 = 帧自己的 / 当前调色板。</summary>
+        public int PaletteImage { get; init; }
         public const int HitFlag = 10000;
     }
     /// <summary>与这组动画配对的图像组（同一套文件，例如 AnimeEx 配 GraphicEx）。</summary>
@@ -220,10 +222,17 @@ public sealed class AnimeArchive : IDisposable
         if (_index.TryGetValue(id, out var ix))
         {
             _f.Seek(ix.Off, SeekOrigin.Begin);
-            var hdr = new byte[_hdr];
+            var hdr = new byte[20];
             for (int k = 0; k < ix.Count; k++)
             {
-                if (_f.Read(hdr, 0, _hdr) < _hdr) break;
+                // 高版本动作（PUK3 起）：头 20 字节，第 16–19 字节 = FF FF FF FF；12–13 = 调色板、14–15 = 翻转等旗标。
+                // 这种动作的帧没有自己的调色板，要用"地图编号 = 动画编号"那张图里带的调色板（CGTool Anime.cs 同样做法）
+                long at = _f.Position;
+                int got = _f.Read(hdr, 0, 20);
+                bool high = got == 20 && hdr[16] == 0xFF && hdr[17] == 0xFF && hdr[18] == 0xFF && hdr[19] == 0xFF;
+                int hl = high ? 20 : _hdr;
+                if (got < hl) break;
+                _f.Seek(at + hl, SeekOrigin.Begin);
                 int dir = BinaryPrimitives.ReadUInt16LittleEndian(hdr), act = BinaryPrimitives.ReadUInt16LittleEndian(hdr.AsSpan(2));
                 int ms = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr.AsSpan(4)), fc = (int)BinaryPrimitives.ReadUInt32LittleEndian(hdr.AsSpan(8));
                 if (fc < 0 || fc > 4096) break;
@@ -236,7 +245,7 @@ public sealed class AnimeArchive : IDisposable
                     frames[j] = BinaryPrimitives.ReadInt32LittleEndian(raw.AsSpan(j * 10));
                     sounds[j] = BinaryPrimitives.ReadUInt16LittleEndian(raw.AsSpan(j * 10 + 8));
                 }
-                c[(dir, act)] = new Action(dir, act, ms, frames, Graphics) { Sounds = sounds };
+                c[(dir, act)] = new Action(dir, act, ms, frames, Graphics) { Sounds = sounds, PaletteImage = high ? id : 0 };
             }
         }
         _cache[id] = c;

@@ -304,6 +304,9 @@ public partial class Main : Node2D
             for (int i = 0; i < 256; i++) { uint c = _assets.Palette.Colors[i]; _weather.Palette[i] = new Color(((c >> 16) & 255) / 255f, ((c >> 8) & 255) / 255f, (c & 255) / 255f); }
             wl.AddChild(_weather);
             nsR.WeatherChanged += (fl, lv) => _weather.Set(fl, lv);
+            _weather.CloudTex = _cache.ImageNo(14648).Tex;
+            _weather.Camera = () => _cam.GetScreenCenterPosition() * _cam.Zoom - GetViewport().GetVisibleRect().Size / 2;   // 换成屏幕像素（天气层是屏幕坐标）
+            _weather.MapId = () => _session?.CurrentMap?.MapId ?? 0;
             nsR.MapPatched += (x1, y1, x2, y2) =>
             {
                 if (_view == null || _view.Map != nsR.Map) return;
@@ -543,7 +546,12 @@ public partial class Main : Node2D
         AddChild(_dialog);
         _dialog.ButtonPressed += b =>
         {
-            if (_dialog.InputBox is { } ib && _session is NetworkSession nsi) nsi.AnswerWith(b, NetworkSession.WindowEscape(ib.Text));
+            if (_dialog.InputBox2 is { } ib2 && _dialog.InputBox is { } ib1 && _session is NetworkSession ns2)
+            {
+                if (b != "cancel" && b != "no" && (ib1.Text.Trim().Length == 0 || ib2.Text.Trim().Length == 0)) { GameAudio.Se(55); return; }
+                ns2.AnswerWith(b, NetworkSession.WindowEscape(ib1.Text.Trim() + "|" + ib2.Text.Trim()));
+            }
+            else if (_dialog.InputBox is { } ib && _session is NetworkSession nsi) nsi.AnswerWith(b, NetworkSession.WindowEscape(ib.Text));
             else _session.Answer(b);
         };
         // 商店买 / 卖（官方专用窗口，见 ShopTrade.cs）；「取消」官方不发包，只关窗口
@@ -733,7 +741,11 @@ public partial class Main : Node2D
         _mapPalette = map.Palette;
         _cache.PaletteNo = CurrentPalette();
         _view = new MapView();
-        _view.Build(map, Walkability.Build(map, _tiles), _cache);
+        var cut = info.CutMap ? CutTable.Load(_cfg.GameRoot, info.MapId) : null;
+        if (info.CutMap && cut == null) _toast.Show("未找到cut数据，请更新客户端。", 4);   // 官方同一句（exe 0x47d538）
+        _view.Cut = cut;
+        _view.Build(map, cut != null ? Walkability.BuildCut(map) : Walkability.Build(map, _tiles), _cache);
+        SetSky(info.MapId);
         _audio?.OnMap(map);
         _audio?.UpdateEnv(x, y);
         AddChild(_view);
@@ -1048,7 +1060,7 @@ public partial class Main : Node2D
             // 服务端补了地图：重算通行（物件会占邻格，整张重算），寻路网格只更新补过的范围（外扩 4 格）
             _walkT = 0; _walkDirty = null;
             var wm = _view.Map;
-            _view.Walk = Walkability.Build(wm, _tiles);
+            _view.Walk = _view.Cut != null ? Walkability.BuildCut(wm) : Walkability.Build(wm, _tiles);
             var rr = wd.Grow(4).Intersection(new Rect2I(0, 0, wm.Width, wm.Height));
             for (int yy = rr.Position.Y; yy < rr.End.Y; yy++)
                 for (int xx = rr.Position.X; xx < rr.End.X; xx++)
@@ -1168,6 +1180,24 @@ public partial class Main : Node2D
             _reconnectTimer = null; GameLog.Write("网络", "回到前台，马上重连"); ns.Reconnect();
         }
     }
+
+    /// <summary>
+    /// 飞船地图（59529 修拉特瓦尔号、38251）的天空：云图 14648 左下那块蓝 (0,820,320,120) 铺满画面（exe 0x4377c5：320×120 一块，铺到 960×600），
+    /// 画在地图最下面、不随镜头动。
+    /// </summary>
+    private void SetSky(int mapId)
+    {
+        _sky ??= new CanvasLayer { Layer = -10 };
+        if (_sky.GetParent() == null) AddChild(_sky);
+        foreach (var c in _sky.GetChildren()) c.QueueFree();
+        if (mapId is not (59529 or 38251) || _cache.ImageNo(14648).Tex is not { } tex) return;
+        var vs = GetViewport().GetVisibleRect().Size;
+        for (float y = 0; y < vs.Y; y += 120)
+            for (float x = 0; x < vs.X; x += 320)
+                _sky.AddChild(new Sprite2D { Texture = tex, Centered = false, RegionEnabled = true, RegionRect = new Rect2(0, 820, 320, 120), Position = new Vector2(x, y) });
+    }
+    private CanvasLayer? _sky;
+    public bool SkyShown => _sky?.GetChildCount() > 0;
 
     private int CurrentPalette()
     {

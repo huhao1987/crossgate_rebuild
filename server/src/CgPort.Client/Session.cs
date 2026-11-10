@@ -4,7 +4,7 @@ using CgPort.Server;
 namespace CgPort.Client;
 
 /// <summary>客户端看到的地图信息。MapFile 是可以直接用 <see cref="MapData.Load"/> 读取的地图文件路径。</summary>
-public sealed record MapInfo(int MapId, string Name, string MapFile);
+public sealed record MapInfo(int MapId, string Name, string MapFile) { public bool CutMap { get; init; } }
 
 /// <summary>战斗单位的显示信息（客户端只需要这些，不需要服务端内部的能力值）。</summary>
 /// <summary>Status：战斗单位状态旗标（C| 每单位第 10 段，16 进制）：0x20 昏睡、0x40 石化、0x80 酒醉、0x100 混乱、0x200 遗忘、0x400 中毒（CGAssistant FL_DEBUFF_*），

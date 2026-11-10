@@ -32,6 +32,14 @@ public partial class NetWeather : SceneTree
                 s.Say("/warp 1000 0 242 100"); _st = 2; _f = 0; break;
             case 2 when _f == 200:
                 Check(s!.Weather.Flags == 0 && _m.WeatherFx?.Count == 0, $"回法兰城停 {s.Weather} {_m.WeatherFx?.Count}");
+                s.Say("/warp 59529 0 19 18"); _st = 3; _f = 0; break;
+            // 飞船修拉特瓦尔号：zzd 标志 24（0x18 = 飘云），飞行中每 10 帧一朵快云
+            case 3 when _f == 300:
+                Check((s!.Weather.Flags & 0x38) != 0 && _m.WeatherFx?.CloudCount > 0, $"飞船飘云：zzd {s.Weather}，画面 {_m.WeatherFx?.CloudCount} 朵");
+                Root.GetTexture().GetImage().SavePng("res://test/out_weather_cloud.png");
+                s.Say("/warp 1000 0 242 100"); _st = 4; _f = 0; break;
+            case 4 when _f == 200:
+                Check(_m.WeatherFx?.CloudCount == 0, $"离开后云清掉 {_m.WeatherFx?.CloudCount}");
                 return End();
         }
         return _f > 3000;

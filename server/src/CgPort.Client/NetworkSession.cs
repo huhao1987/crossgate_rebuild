@@ -584,7 +584,8 @@ public sealed class NetworkSession : IGameSession
         _objects.Clear(); _ground.Clear();
         var file = _opt.ResolveMap(_floor) ?? "";
         LoadMap(_floor, D62Safe(f[2]), D62Safe(f[3]), file);
-        CurrentMap = new MapInfo(_floor, "", file);
+        // 第 9 段 = 1：大图切块地图（地面 / 物件编号 1000+ 查 bin/puk2/cutdat/地图号.cut，exe 0x4516da → 0x437163）
+        CurrentMap = new MapInfo(_floor, "", file) { CutMap = f.Length > 8 && f[8] == "1" };
         Player.MapId = _floor; Player.X = X; Player.Y = Y;
         MapEntered?.Invoke(CurrentMap, X, Y);
     }

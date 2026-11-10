@@ -21,6 +21,14 @@ public sealed class Walkability
     /// <summary>可走物件（如桥、木板路）是否把它占的格子变成可走。默认开启，依据见 docs/RESEARCH.md。</summary>
     public static bool PassableObjectsMakeFloor { get; set; } = true;
 
+    /// <summary>大图切块地图：地面编号是切块号（1000+），不是图档地图编号，查不到通行标志；有地面就算能走（最终以服务端为准）。</summary>
+    public static Walkability BuildCut(MapData map)
+    {
+        var walk = new bool[map.Width * map.Height];
+        for (int i = 0; i < walk.Length; i++) walk[i] = map.Ground[i] != 0;
+        return new Walkability(map.Width, map.Height, walk, 0);
+    }
+
     public static Walkability Build(MapData map, TileInfoTable tiles)
     {
         int w = map.Width, h = map.Height, missing = 0;

@@ -15,6 +15,19 @@ public partial class MapView : Node2D
     private bool _held; private Vector2 _heldPos; private double _heldT;
 
     public MapData Map = null!;
+    /// <summary>大图切块地图（GmNM 第 9 段 = 1）：编号 1000+ 不查 GraphicInfo 地图编号，而是 cut 文件里的第 k 块。</summary>
+    public CutTable? Cut;
+    /// <summary>切块地图上画：图 + 源区域 + 锚点（锚点对准格子中心）。</summary>
+    public (Texture2D Tex, Rect2 Src, Vector2 Off)? CutPiece(int id)
+    {
+        if (Cut == null || !Cut.TryGet(id, out var p) || p.Kind != 0) return null;
+        if (Cache.ImageNo(p.Image) is not (ImageTexture tex, var e) || e == null) return null;
+        // 源区域是在 640×480 的画布上量的：画布中心 (320,240) = 图的锚点，图左上角在画布 (320+偏移x, 240+偏移y)
+        var src = new Rect2(p.Sx - (320 + e.OffsetX), p.Sy - (240 + e.OffsetY), p.W, p.H);
+        var clip = src.Intersection(new Rect2(0, 0, tex.GetWidth(), tex.GetHeight()));
+        if (clip.Size.X <= 0 || clip.Size.Y <= 0) return null;
+        return (tex, clip, new Vector2(-p.Ox, -p.Oy) + (clip.Position - src.Position));
+    }
     public Walkability Walk = null!;
     public TextureCache Cache = null!;
     public Node2D Entities = null!;
@@ -90,6 +103,24 @@ public partial class MapView : Node2D
         if (_chunkObjects.TryGetValue(key, out var list))
             foreach (var (x, y, mid) in list)
             {
+                if (Cut != null && Cut.TryGet(mid, out var cp))
+                {
+                    if (cp.Kind == 1)
+                    {
+                        // 动画块：在锚点画这个动画
+                        var acts = Cache.Library.AnimeActions(cp.Image);
+                        if (acts.Count == 0) continue;
+                        var ak = acts.Keys.OrderBy(q => q.Act).ThenBy(q => q.Dir).First();
+                        var an = new AnimSprite { Cache = Cache, AnimeId = cp.Image, Dir = ak.Dir, Act = ak.Act, FallbackAct = ak.Act, Position = Iso.ToScreen(x, y) + new Vector2(cp.Ox, cp.Oy) };   // 动画块：锚点字段是相对格子的偏移（有符号，exe 0x433fda 加上去）
+                        Entities.AddChild(an); nodes.Add(an);
+                    }
+                    else if (CutPiece(mid) is var (ctex, csrc, coff))
+                    {
+                        var cs = new Sprite2D { Texture = ctex, Centered = false, RegionEnabled = true, RegionRect = csrc, Position = Iso.ToScreen(x, y), Offset = coff };
+                        Entities.AddChild(cs); nodes.Add(cs);
+                    }
+                    continue;
+                }
                 var (tex, e) = Cache.ByMapId(mid);
                 if (tex == null || e == null) continue;
                 // 锚点就是占位区最靠前的格子（物件从锚点往东、往北占格），直接用它排序
@@ -186,6 +217,12 @@ public partial class MapView : Node2D
                 {
                     int mid = m.Ground[m.Index(x, y)];
                     if (mid == 0) continue;
+                    if (View.Cut != null)
+                    {
+                        // 切块地图只认 cut 表里的编号；服务端在第 0 行放的标记格（16、地图号、3、41993、239）官方地图文件里没有，不画
+                        if (View.CutPiece(mid) is var (ctex, csrc, coff)) DrawTextureRectRegion(ctex, new Rect2(Iso.ToScreen(x, y) + coff, csrc.Size), csrc);
+                        continue;
+                    }
                     var (tex, e) = View.Cache.ByMapId(mid);
                     if (tex == null || e == null) { Missing++; continue; }
                     DrawTexture(tex, Iso.ToScreen(x, y) + new Vector2(e.OffsetX, e.OffsetY));

@@ -57,6 +57,32 @@ public sealed class TextureCache
         return (Get(set, e), e);
     }
 
+    /// <summary>高版本动画的帧：用"地图编号 = paletteImage"那张图带的调色板画（PUK3 鲸鱼飞船的鳍等）。</summary>
+    public (ImageTexture? Tex, GraphicEntry? Entry) Frame(GraphicArchive? set, int gid, int paletteImage)
+    {
+        GraphicEntry? e = null;
+        if (set != null) { if (!set.TryLocal(gid, out var le)) return (null, null); e = le; }
+        else if (_lib.Graphics.TryById(gid, out set, out var ge)) e = ge;
+        if (set == null || e == null) return (null, null);
+        var key = (set, e.Id, paletteImage);
+        if (_palTex.TryGetValue(key, out var t)) return (t, e);
+        var pal = PaletteOf(paletteImage);
+        var img = set.Decode(e);
+        t = img == null ? null : ImageTexture.CreateFromImage(Image.CreateFromData(img.Width, img.Height, false, Image.Format.Rgba8,
+            (pal != null ? img with { EmbeddedPalette = pal } : img).ToRgba(_lib.PaletteFor(_paletteNo))));
+        _palTex[key] = t;
+        return (t, e);
+    }
+    private readonly Dictionary<(GraphicArchive, int, int), ImageTexture?> _palTex = new();
+    private readonly Dictionary<int, byte[]?> _palOf = new();
+    private byte[]? PaletteOf(int mapId)
+    {
+        if (_palOf.TryGetValue(mapId, out var p)) return p;
+        p = _lib.Graphics.TryByMapId(mapId, out var set, out var e) ? set.Decode(e)?.EmbeddedPalette : null;
+        _palOf[mapId] = p;
+        return p;
+    }
+
     public (ImageTexture? Tex, GraphicEntry? Entry) ByMapId(int mapId)
     {
         // 编号 0 = 没有图（GraphicInfo 里大量图的地图编号字段是 0，按 0 查会拿到一张无关的图：
@@ -71,7 +97,7 @@ public sealed class TextureCache
     public int PaletteNo
     {
         get => _paletteNo;
-        set { if (value == _paletteNo) return; _paletteNo = value; _tex.Clear(); Version++; }
+        set { if (value == _paletteNo) return; _paletteNo = value; _tex.Clear(); _palTex.Clear(); Version++; }
     }
     /// <summary>
     /// 界面窗口的半透明底：官方窗口底是"深蓝 (0,0,128) 点 + 透明点"的棋盘格，官方客户端画出来是均匀的半透明深蓝（实测战斗招式窗口 22702）。
@@ -159,7 +185,7 @@ public partial class AnimSprite : Sprite2D
             {
                 double dur = Math.Max(100.0, oa.DurationMs);
                 int fi = Math.Min(oa.Frames.Length - 1, (int)(_onceT / (dur / oa.Frames.Length)));
-                Show(oa.Set, oa.Frames[fi]); ShownAct = _onceAct; Cue(oa, _onceAct, fi);
+                Show(oa.Set, oa.Frames[fi], oa.PaletteImage); ShownAct = _onceAct; Cue(oa, _onceAct, fi);
                 if (_onceT >= dur) Complete();
                 return;
             }
@@ -170,7 +196,7 @@ public partial class AnimSprite : Sprite2D
         _t += delta * 1000.0;
         double per = Math.Max(1.0, (double)a.DurationMs / a.Frames.Length);
         int i = (int)(_t / per) % a.Frames.Length;
-        Show(a.Set, a.Frames[i]); ShownAct = Act; Cue(a, Act, i);
+        Show(a.Set, a.Frames[i], a.PaletteImage); ShownAct = Act; Cue(a, Act, i);
     }
 
     /// <summary>帧上的音效标记（见 AnimeArchive.Action.Sounds）：换到新的一帧时回调一次，参数是原始值（1–9999 音效号，≥10000 命中帧）。</summary>
@@ -202,9 +228,9 @@ public partial class AnimSprite : Sprite2D
         d?.Invoke();
     }
 
-    private void Show(GraphicArchive? set, int gid)
+    private void Show(GraphicArchive? set, int gid, int paletteImage = 0)
     {
-        var (tex, e) = Cache!.Frame(set, gid);
+        var (tex, e) = paletteImage > 0 ? Cache!.Frame(set, gid, paletteImage) : Cache!.Frame(set, gid);
         if (tex == null || e == null) return;
         Texture = tex;
         Offset = new Vector2(e.OffsetX, e.OffsetY);
