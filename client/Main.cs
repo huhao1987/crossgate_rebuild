@@ -30,6 +30,8 @@ public partial class Main : Node2D
     private PetDetailWindow _petDetail = null!;
     public PetDetailWindow PetDetail => _petDetail;
     private StatusPanel _status = null!;
+    private TextureButton? _plusBtn;
+    public bool PlusShown => _plusBtn?.Visible == true;
     private SystemPanel _system = null!;
     private SkillPanel _skills = null!;
     private MapPanel _mapWin = null!;
@@ -630,6 +632,24 @@ public partial class Main : Node2D
             _gold.Closed = () => _items.Toggle();
         }
         AddChild(_items);
+        // 标题栏绿色「+」（私服客户端加的，exe 0x415598，BITMAP 254 / 按下 255）：左上那组窗口开着时画在 (218,6)；
+        // 鼠标停上去提示"现在有增加点数N点。" / "现在没有任何的增加点数。"（宠物详情："现在%s的增加点数有%d点。"）；
+        // 有点数时点它打开加点（人物 → 状态窗口明细页，宠物详情 → 它自己的加点）。
+        if (ExeArt.Ok && ExeArt.Bmp(254) is { } plusTex)
+        {
+            var plusLayer = new CanvasLayer { Layer = 17 };
+            var plus = new TextureButton { TextureNormal = plusTex, TexturePressed = ExeArt.Bmp(255) ?? plusTex, Position = new Vector2(218, 6), Visible = false };   // 官方实拍：绿十字在 (221–233, 9–22)，图里十字偏 (3,3)
+            plusLayer.AddChild(plus); AddChild(plusLayer);
+            plus.Pressed += () =>
+            {
+                GameAudio.Se(51);
+                if (_petDetail.Visible) { var pp = _session.Player.Pets.FirstOrDefault(p => p.Slot == _petDetail.Slot); if ((pp?.Points ?? 0) > 0) _petDetail.Refresh(); return; }
+                if (_session.Player.StatPoints <= 0) return;
+                foreach (var w in new CanvasLayer?[] { _skills, _pets, _cardBook, _album, _system, _guildBeast }) if (w != null) w.Visible = false;
+                _status.OpenTab(1);
+            };
+            _plusBtn = plus;
+        }
         _hudSkin.MenuPressed += i =>
         {
             // 左边的窗口（状态/技能/宠物/名片/图鉴/系统）都在左上角同一个位置，右边的（地图/物品）都贴右上：
@@ -1012,6 +1032,17 @@ public partial class Main : Node2D
     {
         UpdateCovered();
         if (_weather != null) _weather.Visible = !_battleUi.Visible;
+        if (_plusBtn != null)
+        {
+            bool any = _status.Visible || _skills.Visible || _pets.Visible || _petDetail.Visible || _cardBook.Visible || _album.Visible || _system.Visible;
+            _plusBtn.Visible = any && !_battleUi.Visible;
+            if (any)
+            {
+                var pp = _petDetail.Visible ? _session.Player.Pets.FirstOrDefault(p => p.Slot == _petDetail.Slot) : null;
+                _plusBtn.TooltipText = pp != null ? $"现在{pp.DisplayName}的增加点数有{pp.Points}点。"
+                    : _session.Player.StatPoints > 0 ? $"现在有增加点数{_session.Player.StatPoints}点。" : "现在没有任何的增加点数。";
+            }
+        }
         if (_walkDirty is { } wd && _view != null && (_walkT += delta) > 0.3)
         {
             // 服务端补了地图：重算通行（物件会占邻格，整张重算），寻路网格只更新补过的范围（外扩 4 格）

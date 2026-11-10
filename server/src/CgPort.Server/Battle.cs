@@ -29,7 +29,7 @@ public sealed class Combatant
     public bool Alive => Hp > 0 && !Escaped;
 }
 
-public enum CommandKind { Attack, Guard, Escape, Wait, Item, Skill, PetSkill, Summon, Weapon, Position }
+public enum CommandKind { Attack, Guard, Escape, Wait, Item, Skill, PetSkill, Summon, Weapon, Position, SkillUp }
 
 /// <summary>一回合里一个单位的指令。Arg：道具 = 背包格子；技能 = 技能栏位置；宠物技能 = 宠物技能序号。Level：技能的第几招（从 0 数）。</summary>
 public sealed record Command(CommandKind Kind, int TargetId = -1, int Arg = -1, int Level = 0);

@@ -11,7 +11,9 @@ namespace CgPort.Godot;
 /// 制造：选配方 → 在选择素材里双击要用的道具（黄框）→「登録」（客户端检查配方的材料够不够：材料登录了 / 材料不足 / 尚未选择材料）
 ///  →「執行」→ IPy a、"加工中" → 约 10 秒后发 sM → 服务端 JgO → 結果（重試 = 用同样的材料再登录一次）。
 /// 采集：IPy 6、生産窗口"伐木中…"→ 约 7 秒后 sM → JgO → 結果（停止）→ 2 秒后自动继续；「停止」或走路就停（IPy 5），按钮变「重試」。
-/// 私服客户端多出来的「自動」按钮没做。
+/// 私服客户端（cg4.06.dll，加壳读不了，按官方 bob 实拍做）在製造窗口「取消」右边加了「自動」（BMP 173 / 按下 174，(267,349)）：
+///  点了 → 从背包里按配方自动选上材料（選擇素材里黄框）并登录 → 发 IPy d（13，不是 a）→ 加工中 → 约 13 秒 sM → JgO 后
+///  不出結果页，直接回到製造窗口（材料清空），要再点一次才做下一个。没有悬停提示。
 /// </summary>
 public partial class ProductionUi : Node
 {
@@ -36,6 +38,8 @@ public partial class ProductionUi : Node
     public SkillInfo? Skill { get; private set; }
     public RecipeInfo? Recipe { get; private set; }
     public bool Working { get; private set; }
+    /// <summary>这一单是「自動」开始的：结果出来回到製造窗口，不出結果页。</summary>
+    public bool AutoCraft { get; private set; }
     public bool GatherRunning { get; private set; }
     private int _gen;
     private List<int> _lastRegistered = new();
@@ -151,13 +155,33 @@ public partial class ProductionUi : Node
         Materials.Message = "材料登录了。"; Materials.Refresh(); Craft.Refresh();
     }
 
-    public void Execute()
+    /// <summary>製造窗口「自動」：自动选材料、登录、执行（IPy 13）。</summary>
+    public void AutoExecute()
     {
         var s = Session(); if (s == null || Recipe == null || Skill == null || Working) return;
+        Materials.Selected.Clear();
+        foreach (var m in Recipe.Materials)
+        {
+            var it = s.Player.Items.Where(i => i.Slot >= 8 && i.ItemId == m.ItemId).OrderBy(i => i.Slot).FirstOrDefault(i => Math.Max(1, i.Count) >= m.Count);
+            if (it == null) { Materials.Message = "材料不足。"; Materials.Refresh(); return; }
+            Materials.Selected.Add(it.Slot);
+        }
+        Register();
+        if (Craft.Registered.Count == 0) return;
+        AutoCraft = true;
+        Execute(13);
+    }
+
+    public void Execute() => Execute(10);
+
+    private void Execute(int work)
+    {
+        var s = Session(); if (s == null || Recipe == null || Skill == null || Working) return;
+        if (work == 10) AutoCraft = false;
         if (Craft.Registered.Count == 0) { Materials.Message = "尚未选择材料。"; Materials.Refresh(); return; }
         if (s.Player.Mp < Recipe.Mp) { Materials.Message = "魔力不足。"; Materials.Refresh(); return; }
         Working = true; int gen = ++_gen;
-        s.SetWork(10);
+        s.SetWork(work);
         Materials.Message = "加工中"; Materials.Refresh(); Craft.Refresh();
         var slots = Craft.Registered.ToList(); var rid = Recipe.Id; var skill = Skill.Slot; int tech = Math.Max(0, Recipe.Level - 1);
         GetTree().CreateTimer(CraftSeconds).Timeout += () => { if (gen == _gen && Working) s.Craft(skill, 0, rid, slots); };
@@ -252,9 +276,18 @@ public partial class ProductionUi : Node
         }
         Working = false; _gen++;
         s.SetWork(5);
+        if (AutoCraft)
+        {
+            // 「自動」：不出結果页，回到製造窗口（材料清空）
+            Craft.Registered.Clear(); Materials.Selected.Clear(); Materials.Message = "请选择材料并登录。";
+            Craft.Refresh(); Materials.Refresh();
+            AutoCraftsDone++;
+            return;
+        }
         Craft.Visible = false; Materials.Visible = false;
         Result.Show(Skill, r, gather: false, Recipe);
     }
+    public int AutoCraftsDone { get; private set; }
     /// <summary>刻印窗口按「刻印」：马上发 sM（官方不发 IPy、不等）。</summary>
     public void DoEngrave(string text)
     {
@@ -354,6 +387,13 @@ public partial class CraftWindow : CgWindow
         if (Ui.Working) Img(23362, 60, 348);
         else Btn(23361, 23360, 60, 348, () => Ui.Execute());
         Btn(22710, 22711, 180, 348, () => Ui.CancelCraft());
+        // 私服「自動」（官方实拍按模板对上 BMP 173 在 (267,349)，鼠标停上去换 174）
+        if (ExeArt.Bmp(173) is { } autoTex)
+        {
+            var b = new TextureButton { TextureNormal = autoTex, TextureHover = ExeArt.Bmp(174), TexturePressed = ExeArt.Bmp(174) ?? autoTex, Position = new Vector2(267, 349) };
+            b.Pressed += () => { GameAudio.Se(51); Ui.AutoExecute(); };
+            Body.AddChild(b);
+        }
     }
 }
 

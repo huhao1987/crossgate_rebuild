@@ -139,7 +139,9 @@ public partial class BattleUi : CanvasLayer
         bar.AddThemeStyleboxOverride("background", new StyleBoxFlat { BgColor = new Color(0.1f, 0.1f, 0.1f), BorderColor = new Color(0.75f, 0.75f, 0.75f), BorderWidthLeft = 1, BorderWidthRight = 1, BorderWidthTop = 1, BorderWidthBottom = 1 });
         bar.AddThemeStyleboxOverride("fill", new StyleBoxFlat { BgColor = new Color(0.85f, 0.15f, 0.15f) });
         var name = u.Name.Length > 0 ? u.Name : (u.Side == 0 ? "你" : $"Lv{u.Level}");
-        var tag = NameTag.Make(name, u.Side == 0 ? NameTag.PlayerColor : NameTag.NpcColor, -92);
+        // 官方战斗里平时不显示名字，鼠标停在单位上才在脚下显示（实拍：迷你蝙蝠的名字在影子上方）
+        var tag = NameTag.Make(name, u.Side == 0 ? NameTag.PlayerColor : NameTag.NpcColor, -22);
+        tag.Visible = false;
         s.AddChild(bar); s.AddChild(tag);
         _stage.AddChild(s);
         _units[u.Id] = new Unit { Id = u.Id, Side = u.Side, MaxHp = u.MaxHp, Hp = u.Hp, Level = u.Level, Sprite = s, Bar = bar, Tag = tag, Home = pos, Down = !u.Alive, Name = u.Name };
@@ -692,6 +694,7 @@ public partial class BattleUi : CanvasLayer
     /// 选目标。点击事件要从 _root 的 GuiInput 拿：_root 是铺满全屏、MouseFilter=Stop 的 Control，
     /// 点击会被 GUI 吃掉，到不了 _UnhandledInput（之前就是因此在战斗里点敌人没反应）。
     /// </summary>
+    private Label? _hoverTag;
     private void OnRootInput(InputEvent e)
     {
         // 鼠标停在单位上：左下提示栏显示"等级 N  名字  生命 当前/最大"（官方实拍；敌人只显示等级、名字）
@@ -704,6 +707,7 @@ public partial class BattleUi : CanvasLayer
                 float d = (u.Sprite.Position + new Vector2(0, -30)).DistanceTo(mm.Position);
                 if (d < hd) { hd = d; hov = u; }
             }
+            if (_hoverTag != hov?.Tag) { if (_hoverTag != null && IsInstanceValid(_hoverTag)) _hoverTag.Visible = false; _hoverTag = hov?.Tag; if (_hoverTag != null) _hoverTag.Visible = true; }
             _root.TooltipText = hov == null ? "" : hov.Side == 0
                 ? $"等级 {hov.Level,3}  {Pad(hov.Name, 18)} 生命 {hov.Hp}/{hov.MaxHp}"
                 : $"等级 {hov.Level,3}  {hov.Name}";
@@ -850,7 +854,6 @@ public partial class BattleUi : CanvasLayer
                 break;
             case CommandKind.Guard:
                 Say($"{Name(e.ActorId)} 防御");
-                Float(a, "防御", Colors.LightSkyBlue);
                 if (a.Sprite.HasAct(Cfg.ActGuard)) { await PlayOnce(a.Sprite, Cfg.ActGuard, hold: true); await Wait(0.25); a.Sprite.Act = Cfg.ActStand; }
                 else await Wait(0.45);
                 break;
@@ -858,23 +861,24 @@ public partial class BattleUi : CanvasLayer
                 Say(e.Escaped ? $"{Name(e.ActorId)} 逃跑成功" : $"{Name(e.ActorId)} 逃跑失败");
                 if (e.Escaped)
                 {
+                    Tag(a, 22320);   // "Escape"（exe 0x468170）
                     var away = a.Home + (a.Side == 0 ? new Vector2(260, 160) : new Vector2(-260, -160));
                     a.Sprite.Act = RunAct(a.Sprite);
                     a.Sprite.Dir = a.Side == 0 ? Iso.AnimeDirFor(0, 1, Cfg.DirOffset) : Iso.AnimeDirFor(0, -1, Cfg.DirOffset);
                     await TweenTo(a.Sprite, "position", away, 0.5);
                     a.Sprite.Visible = false;
                 }
-                else { Float(a, "失败", Colors.Gray); await Wait(0.45); }
+                else await Wait(0.45);
                 break;
             case CommandKind.Summon:
             {
                 // MON：召唤（Damage 1）新宠物从下一次单位列表里加进来；收回（0）就把主人前 / 后一格的宠物淡出
                 SummonsShown++;
-                if (e.Damage == 1) { Say($"{Name(e.ActorId)} 召唤了 {e.Text}"); await Wait(0.4); break; }
+                if (e.Damage == 1) { Say($"{Name(e.ActorId)} 召唤了 {e.Text}"); Tag(a, 22338); await Wait(0.4); break; }   // "Summon"
                 int petId = e.ActorId + (e.ActorId % 10 >= 5 ? -5 : 5);
                 if (_units.TryGetValue(petId, out var pet) && pet.Sprite.Visible)
                 {
-                    Say($"{Name(e.ActorId)} 收回了 {Name(petId)}");
+                    Say($"{Name(e.ActorId)} 收回了 {Name(petId)}"); Tag(a, 22339);   // "Return"
                     await TweenTo(pet.Sprite, "modulate:a", 0.0f, 0.4);
                     pet.Sprite.Visible = false; pet.Bar.Visible = false; pet.Tag.Visible = false;
                     _units.Remove(petId);
@@ -884,7 +888,15 @@ public partial class BattleUi : CanvasLayer
             case CommandKind.Weapon:
                 // EQU：战斗中换武器，形象跟着换
                 if (e.TechId > 0) a.Sprite.AnimeId = e.TechId;
-                Say($"{Name(e.ActorId)} 更换了武器");
+                Say($"{Name(e.ActorId)} 更换了武器"); Tag(a, 22321);   // "Weapon Change"
+                await Wait(0.3);
+                break;
+            case CommandKind.SkillUp:
+                Tag(a, 22323);   // "SKILL LV UP!"（exe 0x4683e6）
+                await Wait(0.3);
+                break;
+            case CommandKind.Position:
+                Tag(a, 22322);   // "Position Change"
                 await Wait(0.3);
                 break;
             case CommandKind.Item when e.Sealed != null && _units.TryGetValue(e.TargetId, out var st):
@@ -951,6 +963,7 @@ public partial class BattleUi : CanvasLayer
         float end = ok ? 0 : 1;
         while (sc != end) { float f = await Frames(); sc = ok ? Math.Max(0, sc - 0.01f * f) : Math.Min(1, sc + 0.01f * f); t.Sprite.Scale = baseScale * sc; }
         GameAudio.Se(212);
+        if (!ok) Tag(t, 22333);   // "Fail"（exe 0x46a33a，封印卡那段）
         if (ok) { t.Down = true; t.Sprite.Visible = false; t.Bar.Visible = false; t.Tag.Visible = false; }
         t.Sprite.Scale = baseScale;
         while (cs > 0) { cs = Math.Max(0, cs - 0.025f * await Frames()); if (card != null) card.Scale = baseScale * cs; }
@@ -965,7 +978,6 @@ public partial class BattleUi : CanvasLayer
     /// </summary>
     private async Task PlayChiBall(Unit a, List<BattleEvent> group, string name)
     {
-        Float(a, name, Colors.Yellow);
         PlayEffectAnime(a, 110008);
         await Wait(0.35);
         int total = 0;
@@ -989,7 +1001,7 @@ public partial class BattleUi : CanvasLayer
                 ball.Position = to;
             }
             GameAudio.Se(255);
-            if (e.Missed) Float(t, "Miss", Colors.LightGray);
+            if (e.Missed) Tag(t, 22331, 20);
             else { total += e.Damage; await Hit(a, t, e, heal: false); }
             if (ball != null)
             {
@@ -1045,8 +1057,7 @@ public partial class BattleUi : CanvasLayer
             await Wait(0.35);
             var to = a.Home + (t0.Home - a.Home) * 0.72f;
             a.Sprite.Act = RunAct(a.Sprite); a.Sprite.ZIndex = 1;
-            Float(a, name, Colors.Yellow);
-            await TweenTo(a.Sprite, "position", to, 0.28);
+                await TweenTo(a.Sprite, "position", to, 0.28);
             int total = 0;
             foreach (var e in group)
             {
@@ -1054,7 +1065,7 @@ public partial class BattleUi : CanvasLayer
                 if (a.Sprite.HasAct(Cfg.ActAttack)) AttackAnimsShown++;
                 var (sh, sd) = PlayAttack(a.Sprite, Cfg.ActAttack);
                 await sh;
-                if (e.Missed) { Float(t, "Miss", Colors.LightGray); await sd; continue; }
+                if (e.Missed) { Tag(t, 22331, 20); await sd; continue; }
                 total += e.Damage;
                 await Task.WhenAll(Hit(a, t, e, heal: false), sd);
             }
@@ -1065,7 +1076,6 @@ public partial class BattleUi : CanvasLayer
             return;
         }
         // 魔法：原地施法
-        Float(a, name, Colors.Yellow);
         // 回复类魔法施法时，施法者身上一阵往上的光条（exe 0x46df14 = 0x1ae04 − 档位：110084…110081，官方实拍补血 LV1）
         if (CastEffect(e0.TechId) is int cfx) PlayEffectAnime(a, cfx);
         await PlayOnce(a.Sprite, a.Sprite.HasAct(Cfg.ActMagic) ? Cfg.ActMagic : Cfg.ActAttack);
@@ -1074,7 +1084,7 @@ public partial class BattleUi : CanvasLayer
         foreach (var e in group)
             if (_units.TryGetValue(e.TargetId, out var t))
             {
-                if (e.Missed) { Float(t, "Miss", Colors.LightGray); continue; }
+                if (e.Missed) { Tag(t, 22331, 20); continue; }
                 hits.Add(Hit(a, t, e, e.Heal));
             }
         await Task.WhenAll(hits);
@@ -1094,7 +1104,7 @@ public partial class BattleUi : CanvasLayer
         {
             HealsShown++;
             t.Hp = Math.Min(t.MaxHp > 0 ? t.MaxHp : int.MaxValue, t.Hp + e.Damage);
-            Float(t, e.Damage.ToString(), new Color(0.35f, 1f, 0.45f));
+            Damage(t, e.Damage, 1);
             var hb = t.Bar.CreateTween().SetSpeedScale(Speed);
             hb.TweenProperty(t.Bar, "value", (double)t.Hp, 0.3);
             if (t.Id == _playerId) _status.Text = $"HP {t.Hp}/{t.MaxHp}";
@@ -1102,7 +1112,7 @@ public partial class BattleUi : CanvasLayer
             return;
         }
         t.Hp = Math.Max(0, t.Hp - e.Damage);
-        Float(t, e.Damage.ToString(), t.Side == 0 ? new Color(1f, 0.55f, 0.4f) : Colors.White);
+        Damage(t, e.Damage, 0);
         Flash(t.Sprite);
         var hurt = PlayOnce(t.Sprite, Cfg.ActHurt);
         var knock = (t.Home - a.Home).Normalized() * 14;
@@ -1216,7 +1226,7 @@ public partial class BattleUi : CanvasLayer
         if (e.Missed)
         {
             Say($"{Name(a.Id)} 攻击 {Name(t.Id)}，没打中");
-            Float(t, "Miss", Colors.LightGray);
+            Tag(t, 22331, 20);
             var side = new Vector2(0, -18);
             await TweenTo(t.Sprite, "position", t.Home + side, 0.1);
             await TweenTo(t.Sprite, "position", t.Home, 0.12);
@@ -1225,7 +1235,7 @@ public partial class BattleUi : CanvasLayer
         {
             Say($"{Name(a.Id)} 攻击 {Name(t.Id)}，造成 {e.Damage} 点伤害" + (e.Killed ? "，击倒！" : ""));
             t.Hp = Math.Max(0, t.Hp - e.Damage);
-            Float(t, e.Damage.ToString(), t.Side == 0 ? new Color(1f, 0.55f, 0.4f) : Colors.White);
+            Damage(t, e.Damage, 0);
             Flash(t.Sprite);
             PlayEffectAnime(t, 110001);   // 命中火花（官方 0x45dc3c 默认 110001）
             var hurt = PlayOnce(t.Sprite, Cfg.ActHurt);
@@ -1301,18 +1311,62 @@ public partial class BattleUi : CanvasLayer
         tw.TweenProperty(s, "modulate", Colors.White, 0.18);
     }
 
-    private void Float(Unit u, string text, Color color)
+    public int TagsShown { get; private set; }
+    public int DamageNumbersShown { get; private set; }
+
+    /// <summary>
+    /// 战斗文字图（exe 0x45ce9b 建对象、每帧 0x45cda4）：画在单位位置往下 30；先等 delay 帧（Miss 是 20），
+    /// 然后往上跳（速度 14 每帧减 1，速度 s 每帧走 s/4 像素），再往下落（速度 0 每帧加 1 到 12），停 60 帧消失。
+    /// 22331 Miss、22320 Escape、22321 Weapon Change、22322 Position Change、22323 SKILL LV UP!、22338 Summon、22339 Return、22333 Fail。
+    /// </summary>
+    private void Tag(Unit u, int image, int delay = 0)
     {
-        var l = new Label { Text = text, Position = u.Sprite.Position + new Vector2(-30, -130), Size = new Vector2(60, 30), HorizontalAlignment = HorizontalAlignment.Center, ZIndex = 10 };
-        l.AddThemeFontSizeOverride("font_size", 24);
-        l.AddThemeColorOverride("font_color", color);
-        l.AddThemeColorOverride("font_outline_color", Colors.Black);
-        l.AddThemeConstantOverride("outline_size", 6);
-        _root.AddChild(l);
-        var tw = l.CreateTween().SetSpeedScale(Speed).SetParallel();
-        tw.TweenProperty(l, "position:y", l.Position.Y - 40, 0.7);
-        tw.TweenProperty(l, "modulate:a", 0.0, 0.7).SetDelay(0.3);
-        tw.Chain().TweenCallback(Callable.From(l.QueueFree));
+        if (Cache.ImageNo(image) is not (ImageTexture tex, var e) || e == null) return;
+        TagsShown++;
+        var sc = u.Sprite.Scale;
+        var spr = new Sprite2D { Texture = tex, Centered = false, Offset = new Vector2(e.OffsetX, e.OffsetY), Scale = sc, ZIndex = 10, Visible = false };
+        _root.AddChild(spr);
+        _ = Hop(spr, u.Sprite.Position + new Vector2(0, 30) * sc, sc.Y, delay, 14, 12, 60);
+    }
+
+    /// <summary>
+    /// 伤害 / 回复数字（exe 0x45cc0e，每位一个对象 0x45ca91）：数字图 243700+位（'+' 243800、'-' 243801，白色 12×16），
+    /// 按种类染色（颜色表 0x49a75c：0 扣血红、1 回血绿、2 扣魔蓝、3 回魔黄），再在 (+1,+1) 叠一层 #60010101 的影子；
+    /// 第 i 位 x = 单位 x + (2i − 位数 + 1)×6，y = 单位 y − 80；晚 5i 帧出现，往上跳（速度 10 递减）、落下（到 10），
+    /// 停 50 + 5×(后面还剩几位) 帧消失。
+    /// </summary>
+    private void Damage(Unit u, int amount, int kind)
+    {
+        DamageNumbersShown++;
+        var color = kind switch { 1 => new Color(0, 1, 0), 2 => new Color(0, 0, 1), 3 => new Color(1, 1, 0), _ => new Color(1, 0, 0) };
+        var text = Math.Abs(amount).ToString();
+        var sc = u.Sprite.Scale;
+        for (int i = 0; i < text.Length; i++)
+        {
+            int img = 243700 + (text[i] - '0');
+            if (Cache.ImageNo(img) is not (ImageTexture tex, var e) || e == null) continue;
+            var node = new Node2D { ZIndex = 10, Scale = sc, Visible = false };
+            node.AddChild(new Sprite2D { Texture = tex, Centered = false, Offset = new Vector2(e.OffsetX + 1, e.OffsetY + 1), Modulate = new Color(0.004f, 0.004f, 0.004f, 0x60 / 255f) });
+            node.AddChild(new Sprite2D { Texture = tex, Centered = false, Offset = new Vector2(e.OffsetX, e.OffsetY), Modulate = color });
+            _root.AddChild(node);
+            var at = u.Sprite.Position + new Vector2((2 * i - text.Length + 1) * 6, -80) * sc;
+            _ = Hop(node, at, sc.Y, 5 * i, 10, 10, 50 + 5 * (text.Length - i - 1));
+        }
+    }
+
+    /// <summary>上面两种共用的跳动：等 delay 帧 → 往上（速度 up 递减到 0）→ 往下（速度 0 递增到 down）→ 停 hold 帧 → 删掉。速度 s = 每帧 s/4 像素（方向表 0x495a98 第 s 行 64·s/256）。</summary>
+    private async Task Hop(Node2D n, Vector2 at, float scale, int delay, int up, int down, int hold)
+    {
+        n.Position = at;
+        for (float f = 0; f < delay; f += await Frames()) { }
+        if (!IsInstanceValid(n)) return;
+        n.Visible = true;
+        float speed = up, y = at.Y;
+        while (speed > 0) { float f = await Frames(); if (!IsInstanceValid(n)) return; y -= speed / 4f * scale * f; speed -= f; n.Position = new Vector2(at.X, y); }
+        speed = 0;
+        while (speed < down) { float f = await Frames(); if (!IsInstanceValid(n)) return; y += speed / 4f * scale * f; speed += f; n.Position = new Vector2(at.X, y); }
+        for (float f = 0; f < hold; f += await Frames()) { if (!IsInstanceValid(n)) return; }
+        if (IsInstanceValid(n)) n.QueueFree();
     }
 }
 

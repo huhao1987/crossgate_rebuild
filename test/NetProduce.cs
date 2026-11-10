@@ -10,6 +10,7 @@ namespace CgPort.Godot.Tests;
 /// </summary>
 public partial class NetProduce : SceneTree
 {
+    int _auto0;
     int _f, _st; Main _m = null!; readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_prod_{n}.png");
@@ -84,7 +85,29 @@ public partial class NetProduce : SceneTree
                 Check(log.Contains("sM 5 0 -1 960|") || System.Text.RegularExpressions.Regex.IsMatch(log, @"sM \d+ 0 -1 960\|\d+\|\d+"), "服务端收到 sM 制造");
                 Check(System.Text.RegularExpressions.Regex.IsMatch(log, @"IPy 6[\s\S]*sM \d+ 0 -1 *\r?\n[\s\S]*IPy 5"), "采集的 IPy 6 / sM / IPy 5");
                 p.CloseAll(); s!.Say("/warp 1000 0 242 100");
+                s.Say("/giveItem 12800 10 1 1"); s.Say("/giveItem 12801 2 1 1");
+                _st = 20; _f = 0; break;
+            // 私服「自動」：自动选材料登录 → IPy d → 结果出来留在製造窗口
+            case 20 when _f == 120:
+            {
+                var sk = Sk(s!, "制药")!;
+                _auto0 = p.AutoCraftsDone;
+                _m.SkillWin.ShowDetail(s!.Player.Skills.IndexOf(sk)); _m.SkillWin.TechChosen?.Invoke(sk, 0); _st = 21; _f = 0; break;
+            }
+            case 21 when _f == 60:
+                p.Recipes.TestChoose(0); _st = 22; _f = 0; break;
+            case 22 when _f == 40:
+                p.AutoExecute();
+                Check(p.Working && p.AutoCraft && p.Craft.Registered.Count == 2, $"自動：自动登录材料 {string.Join(",", p.Craft.Registered)}、开始加工");
+                _st = 23; _f = 0; break;
+            case 23 when p.AutoCraftsDone > _auto0 || _f > 1500:
+            {
+                Check(p.AutoCraftsDone > _auto0 && p.Craft.Visible && !p.Result.Visible && p.Craft.Registered.Count == 0, $"自動做完：留在製造窗口（結果页 {p.Result.Visible}），材料清空");
+                var log2 = string.Join("\n", Directory.GetFiles("/home/claude/wine/cgmsv/log", "packet_*.txt").OrderBy(x => x).TakeLast(1).SelectMany(File.ReadLines).Where(l => l.Contains("\ttest1\t")).TakeLast(60));
+                Check(System.Text.RegularExpressions.Regex.IsMatch(log2, @"IPy d[\s\S]*sM \d+ 0 -1 960\|"), "自動发的是 IPy d，然后 sM");
+                p.CloseAll();
                 return End();
+            }
         }
         return _f > 9000;
     }

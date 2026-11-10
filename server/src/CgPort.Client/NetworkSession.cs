@@ -1695,6 +1695,12 @@ public sealed class NetworkSession : IGameSession
                 ev.Add(new BattleEvent(_turn, Hex(tok[i + 1]), CommandKind.Weapon, -1, 0, false, false, false, TechId: Hex(tok[i + 2])));
                 i += 4; continue;
             }
+            // 技能在战斗中升级：SUP|单位|FF（官方头上出 22323 "SKILL LV UP!"）
+            if (tok[i] == "SUP" && i + 1 < tok.Length)
+            {
+                ev.Add(new BattleEvent(_turn, Hex(tok[i + 1]), CommandKind.SkillUp, -1, 0, false, false, false));
+                i += 2; continue;
+            }
             // 换位置（前后排对调）：POS|单位
             if (tok[i] == "POS" && i + 1 < tok.Length)
             {

@@ -92,6 +92,8 @@ public partial class StatusPanel : CgWindow
     public Func<NetworkSession?> Session = () => null;
     public Action<string, Action>? Ask;   // 确认框（删除称号）
     private int _tab;   // 0 状态 1 明细 2 称号
+    /// <summary>打开到某一页（标题栏「+」用：1 = 明细，有加点）。</summary>
+    public void OpenTab(int tab) { _tab = tab; Visible = true; Refresh(); }
     private int _titlePage, _titleSel = -1;
     private LineEdit? _freeEdit;
 
@@ -608,7 +610,7 @@ public partial class SystemPanel : CgWindow
 ///  列表页 22750：职业居中 x147、字顶 49；剩余技能栏右对齐 162；每个技能一条 22703 在 (6, 107+28i)，名字 x36，等级右对齐 218，占用栏数右对齐 252。
 ///  详情页 22760：技能名居中 x89；等级 x220；经验值 x66；下一级右对齐 239；招式行 22704 在 (17, 80+22i)，名字 x39，MP 右对齐 245；
 ///  底部 列表 22830/31 在 (25,420)、◀ 22832/33 (128,420)、▶ 22834/35 (211,420)、页码"2/4"居中 x183。
-///  官方等级显示"1/ 8"（第二个数是这个职业能练到的最高等级），这个上限的来源还没弄清，暂时只显示当前等级。
+///  列表页只显示等级（官方实拍）；详情页"1/ 8"的第二个数是 cNE 第 6 段（这个职业能练到的最高等级）。
 /// </summary>
 public partial class SkillPanel : CgWindow
 {
