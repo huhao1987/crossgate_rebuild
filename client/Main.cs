@@ -348,7 +348,7 @@ public partial class Main : Node2D
         AddChild(ui);
         _hud.Position = new Vector2(8, 8);
         ui.AddChild(_hud);
-        _hudSkin = new Hud { Cache = _cache, PinMenu = _cfg.MobileUi };
+        _hudSkin = new Hud { Cache = _cache, PinMenu = _cfg.MobileUi, Now = () => DateTimeOffset.UtcNow.ToUnixTimeSeconds() + (_session is NetworkSession tns ? tns.ServerTimeOffset : 0) };
         AddChild(_hudSkin);
         // 右上按钮（官方提示）：22581 对战 Ctrl+J、22583 观战 Ctrl+K、22585 组队 Ctrl+L、22587 交换名片、22589 交易
         _hudSkin.ButtonPressed += id =>

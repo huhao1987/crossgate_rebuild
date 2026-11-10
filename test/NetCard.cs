@@ -4,13 +4,13 @@ using CgPort.Core.Assets;
 using Godot;
 namespace CgPort.Godot.Tests;
 /// <summary>
-/// 联网名片/邮件（配合工具号 bob = test2：站在 242,101、开着「名」、过一会儿给名片簿第 0 张写信）：
+/// 联网名片/邮件（测试自己开第二个连接当 bob = test2：站在 242,101、开着「名」，交换名片后给 hao 写信 "hello hao"）：
 /// 开「名」→ 站到 bob 旁边面向他 → 右上「交换名片」→ 名片簿里有 bob → 收到 bob 的信（左上「郵件」亮）→ 记录里有内容
 /// → 给 bob 写信 → 删除 bob 的名片（确认框点"是"）。
 /// </summary>
 public partial class NetCard : SceneTree
 {
-    int _f, _st, _try, _bobIdx = -1; (int, int) _face, _want; Main _m = null!; readonly List<string> _r = new();
+    NetworkSession _b = null!; bool _bWarp, _bMail; int _f, _st, _try, _bobIdx = -1; (int, int) _face, _want; Main _m = null!; readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_card_{n}.png");
     bool End() { GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
@@ -22,12 +22,23 @@ public partial class NetCard : SceneTree
         o["player_anime"] = 106002;
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());
         _m = (Main)GD.Load<PackedScene>("res://client/main.tscn").Instantiate(); Root.AddChild(_m);
+        var maps = CgPort.Core.MapData.IndexServerMapDir("/home/claude/wine/cgmsv/data/map");
+        _b = new NetworkSession(new NetworkOptions { Host = "127.0.0.1", Port = 9030, CdKey = "test2", Account = "test2", Password = "123456", ResolveMap = f => maps.TryGetValue(f, out var m) ? m.Path : null });
+        _b.Start();
     }
     public override bool _Process(double d)
     {
-        _f++;
+        _f++; _b.Poll();
         var s = _m.Session as NetworkSession;
         var h = _m.HudSkin;
+        // bob：进游戏后站到 242,101、开「名」；收到 hao 的名片后给他写信
+        if (!_bWarp && _b.InGame && _b.CurrentMap != null)
+        {
+            _bWarp = true;
+            for (int i = 0; i < 60; i++) if (_b.Cards[i]?.Name == "hao") _b.DeleteCard(i);
+            _b.Say("/warp 1000 0 242 101"); if ((_b.Flags & 16) == 0) _b.ToggleFlag(16);
+        }
+        if (!_bMail && _st >= 6 && Array.FindIndex(_b.Cards.ToArray(), c => c?.Name == "hao") is int hi and >= 0) { _bMail = true; _b.SendMail(hi, "hello hao"); }
         switch (_st)
         {
             case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90 && s.NpcsOnCurrentMap().Any(n => n.Name == "bob"):

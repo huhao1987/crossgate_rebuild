@@ -4,12 +4,13 @@ using CgPort.Core.Assets;
 using Godot;
 namespace CgPort.Godot.Tests;
 /// <summary>
-/// 宠物邮件（配合官方客户端 bob = test2 在线，名片簿里互相有名片；/dolua gm_petmail.lua 给宠物加「宠物邮件」技能）：
+/// 宠物邮件（测试自己开第二个连接当 bob = test2；先面对面交换名片；/dolua gm_petmail.lua 给宠物加「宠物邮件」技能）：
 /// 名片「郵件」→ 選擇郵件 → 寵物郵件 → 选宠物 → 编辑 + 选道具 → 送出（rMsv）→ 出发效果；
-/// 然后等 bob 那边发一封宠物邮件过来（外部脚本点官方客户端）→ 到达效果 + 宠物出现 + 聊天提示 → 邮件记录。
+/// 然后 bob 回寄一封宠物邮件 → 到达效果 + 宠物出现 + 聊天提示 → 邮件记录。
 /// </summary>
 public partial class NetPetMail : SceneTree
 {
+    NetworkSession _b = null!; bool _bSent;
     int _f, _st, _bob = -1, _pet = -1, _item = -1, _fx0; string _since = ""; Main _m = null!; readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_petmail_{n}.png");
@@ -24,15 +25,41 @@ public partial class NetPetMail : SceneTree
         o["player_anime"] = 106002;
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());
         _m = (Main)GD.Load<PackedScene>("res://client/main.tscn").Instantiate(); Root.AddChild(_m);
+        var maps = CgPort.Core.MapData.IndexServerMapDir("/home/claude/wine/cgmsv/data/map");
+        _b = new NetworkSession(new NetworkOptions { Host = "127.0.0.1", Port = 9030, CdKey = "test2", Account = "test2", Password = "123456", ResolveMap = f => maps.TryGetValue(f, out var m) ? m.Path : null });
+        _b.Start();
     }
     public override bool _Process(double d)
     {
-        _f++;
+        _f++; _b.Poll();
         var s = _m.Session as NetworkSession;
+        // bob：hao 的宠物出发以后，回寄一封（第一只宠物 + 背包里第一件道具）
+        if (_st == 7 && !_bSent && _f > 120)
+        {
+            _bSent = true;
+            int ci = Array.FindIndex(_b.Cards.ToArray(), c => c?.Name == "hao");
+            var bp = _b.Player.Pets.OrderBy(p => p.Slot).FirstOrDefault(p => p.Name.Length > 0);
+            var bi = _b.Player.Items.Where(i => i.Slot >= 8).OrderBy(i => i.Slot).FirstOrDefault();
+            GD.Print($"BOB 寄宠物邮件：名片 {ci} 宠物 {bp?.Slot} 道具 {bi?.Slot}");
+            if (ci >= 0 && bp != null && bi != null) _b.SendPetMail(ci, bp.Slot, bi.Slot, "from bob");
+        }
         switch (_st)
         {
-            case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90:
-                s.Say("/dolua gm_addpet.lua"); s.Say("/dolua gm_petmail.lua"); s.Say("/warp 1000 0 238 101"); _st = 1; _f = 0; break;
+            // 准备：bob 进游戏、给宠物加宠物邮件；两人在法兰城 238,101 / 239,101 面对面开「名」交换名片
+            case 0 when s?.InGame == true && s.CurrentMap != null && _b.InGame && _b.CurrentMap != null && _f > 90:
+                if (_b.InParty) _b.PartyButton();
+                foreach (var c in new[] { "/dolua gm_addpet.lua", "/dolua gm_petmail.lua", "/warp 1000 0 239 101" }) _b.Say(c);
+                s.Say("/dolua gm_addpet.lua"); s.Say("/dolua gm_petmail.lua"); s.Say("/warp 1000 0 238 101"); _st = 50; _f = 0; break;
+            case 50 when _f == 90:
+                if ((s!.Flags & 16) == 0) s.ToggleFlag(16);
+                if ((_b.Flags & 16) == 0) _b.ToggleFlag(16);
+                s.Face(1, 0); _b.Face(-1, 0); _st = 51; _f = 0; break;
+            case 51 when _f == 40:
+                if (!s!.Cards.Any(c => c?.Name == "bob")) s.ExchangeCard();
+                _st = 52; _f = 0; break;
+            case 52 when _f == 60:
+                if (!_b.Cards.Any(c => c?.Name == "hao")) _b.ExchangeCard();
+                _st = 1; _f = 0; break;
             case 1 when _f == 90:
                 _bob = Array.FindIndex(s!.Cards.ToArray(), c => c?.Name == "bob");
                 var pet = s.Player.Pets.FirstOrDefault(p => p.Slot is >= 0 and < 5 && NetworkSession.CanPetMail(p));

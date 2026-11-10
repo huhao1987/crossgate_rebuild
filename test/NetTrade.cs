@@ -4,14 +4,15 @@ using CgPort.Core.Assets;
 using Godot;
 namespace CgPort.Godot.Tests;
 /// <summary>
-/// 联网交易（配合官方客户端：bob 在法兰城、开着「易」；自己站到他面前）：
+/// 联网交易（测试自己开第二个连接当 bob = test2：在法兰城 242,101、开着「易」；自己站到他面前）：
 /// 开「易」→ 站到 (241,101) 面向 bob → 右上「交易」→ "请选择对象"点 bob → 交易窗口 → 双击选第 8 格道具 + 金币 2 →「開啓」
-/// → 外部脚本看到 /tmp/trade_ready 让 bob 也开启、确认 → 自己「確認交易」→ 交易完成，道具和金币变了。
+/// → bob 也开启（不放东西）→ 自己「確認交易」→ bob 确认 → 交易完成，道具和金币变了。
 /// </summary>
 public partial class NetTrade : SceneTree
 {
     (int, int) _face, _want; int _try;
     bool End() { GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true; }
+    NetworkSession _b = null!; bool _bWarp, _bOpen, _bConf;
     int _f, _st; long _gold0; int _slotItem; Main _m = null!; readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_trade_{n}.png");
@@ -24,15 +25,27 @@ public partial class NetTrade : SceneTree
         o["player_anime"] = 106002;
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());
         _m = (Main)GD.Load<PackedScene>("res://client/main.tscn").Instantiate(); Root.AddChild(_m);
+        var maps = CgPort.Core.MapData.IndexServerMapDir("/home/claude/wine/cgmsv/data/map");
+        _b = new NetworkSession(new NetworkOptions { Host = "127.0.0.1", Port = 9030, CdKey = "test2", Account = "test2", Password = "123456", ResolveMap = f => maps.TryGetValue(f, out var m) ? m.Path : null });
+        _b.Start();
     }
     public override bool _Process(double d)
     {
-        _f++;
+        _f++; _b.Poll();
         var s = _m.Session as NetworkSession;
         var h = _m.HudSkin;
+        if (!_bWarp && _b.InGame && _b.CurrentMap != null)
+        {
+            _bWarp = true;
+            if (_b.InParty) _b.PartyButton();
+            _b.Say("/warp 1000 0 242 101"); if ((_b.Flags & 32) == 0) _b.ToggleFlag(32);
+        }
+        // bob：hao 开启以后也开启（不放东西），hao 确认以后也确认
+        if (_st >= 7 && !_bOpen && _b.Trade != null && _f > 30) { _bOpen = true; _b.OpenTrade(Array.Empty<int>(), 0); }
+        if (_st >= 9 && !_bConf && _b.Trade != null && _f > 20) { _bConf = true; _b.ConfirmTrade(); }
         switch (_st)
         {
-            case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90 && s.NpcsOnCurrentMap().Any(n => n.Name == "bob"):
+            case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90 && _bWarp && s.NpcsOnCurrentMap().Any(n => n.Name == "bob"):
                 _try = 0; _st = 100; _f = 0; break;
             // 依次试 bob 周围 8 格（有的格子不能站，传送不过去），站上去后面向他
             case 100 when _f == 1:

@@ -123,6 +123,15 @@ public sealed class MapData
 /// </summary>
 public static class CgClock
 {
+    /// <summary>
+    /// 左上角天色值 0–191（exe 0x41636d）：t = 现在 − 0x3ae805e7，一个游戏日 7200 秒，值 = ((t mod 7200)×192/7200 + 168) mod 192。
+    /// </summary>
+    public static int Sky(long unix)
+    {
+        long t = ((unix - 0x3ae805e7) % 7200 + 7200) % 7200;
+        return (int)((t * 192 / 7200 + 168) % 192);
+    }
+
     public static int Palette(long unix)
     {
         long t = ((unix - 95) % 7200 + 7200) % 7200;

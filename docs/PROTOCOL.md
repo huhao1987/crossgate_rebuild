@@ -376,7 +376,6 @@ rU 第 8 段 = 道具等级。
 - **回到地图** EO = `eL 0`（战斗结束回地图后）；服务端回自己的 `nsY`。
 - **浏览摊位** 摊位窗口打开后官方发 PRD = `TLKH 3 对方id`（0.5 秒限一次；cgmsv 不回）。
 - 其它在表里但这个服务端没见到的：`PhdQ`=ABG、`vWpn`=SI（交换物品格回显）、`hB`=RD、`ftaN`=ES、`PVfz`=SH、`bJg`=PC、`BHe`=PS、`sZWu`=HL、`Yo`=S、`Dn`=ALN、`lDuJ`=PME、`rMsv`=PMSG、`ELoy`=IA、`BG`=IH、`cZt`=SP、`Ukuy`=MP。
-- exe 资源 103 是一张 180×72 的聊天表情图（36 个），还没接。
 
 ## 物品换格 / 地图工具 / 聊天表情（2026-11-09 官方 bob 实测 + exe）
 
@@ -529,4 +528,6 @@ rU 第 8 段 = 道具等级。
   - `CHT|?|?|?|?|文字` 战斗中的系统话（"xx逃跑了。"），显示在战斗消息栏。
   - `MON|m主人|0|p栏` 收回宠物；`MON|m主人|1|p栏|名字|形象|等级|HP|最大HP|MP|最大MP|旗标` 召唤宠物（新单位从下一次 C| 列表加进战场）。
   - `EQU|单位|新形象|新形象` 战斗中换武器，形象跟着换。`POS|单位` 换前后排（位置由下一次单位列表校正）。
-- 还没解析：SUP（`SUP|单位|FF`，意义未明）以及本服没发过的 RID GMN BST REB PDN CBC PLV PNO CFP PUE PSN CLR。
+- `SUP|单位|FF` = 这个单位的技能在战斗中升级了（唯一样本：气功弹打完紧接 SUP|5，同一刻服务端发 cNE 气功弹 等级 2 和 Rspn 多了 LV2）。官方画面上有什么表现没实拍到（要在战斗中正好升级），移植先不处理。
+  命令名→编号表在 0x4879b8（{编号, 名字}×24：SKL 0 ESC 1 CLR 2 SUP 3 POS 4 MON 5 EQU 6 ITM 7 CMB 8 PSN 9 PUE 10/11 ACT 12 CFP 13 CHT 14 PNO 15 PLV 16 CBC 17 PDN 18 REB 19 BST 20 GMN 21 RID 22 END 23），代码里没直接引用这张表的地址。
+- 还没解析：本服没发过的 RID GMN BST REB PDN CBC PLV PNO CFP PUE PSN CLR。

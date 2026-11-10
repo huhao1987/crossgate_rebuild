@@ -4,12 +4,12 @@ using CgPort.Core.Assets;
 using Godot;
 namespace CgPort.Godot.Tests;
 /// <summary>
-/// 联网组队（要配合官方客户端：bob 站在 法兰城 242,101、开着「隊」）：
+/// 联网组队（测试自己开第二个连接当 bob = test2：站在 法兰城 242,101、开着「隊」，hao 进队后走两步）：
 /// 左上「隊」开关切换 → 面向 bob 点右上「组队」→ 进队 → 队长 bob 走动时自己跟着走（外部脚本看到 /tmp/party_ready 后去点官方画面）→ 再点「组队」离队。
 /// </summary>
 public partial class NetParty : SceneTree
 {
-    int _f, _st, _flags0; Main _m = null!; readonly List<string> _r = new();
+    NetworkSession _b = null!; bool _bWarp; int _bSteps, _bDir = 4; (int, int) _bLast; int _f, _st, _flags0; Main _m = null!; readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_party_{n}.png");
     public override void _Initialize()
@@ -21,15 +21,30 @@ public partial class NetParty : SceneTree
         o["player_anime"] = 106002;
         File.WriteAllText(ProjectSettings.GlobalizePath("user://config.json"), o.ToJsonString());
         _m = (Main)GD.Load<PackedScene>("res://client/main.tscn").Instantiate(); Root.AddChild(_m);
+        var maps = CgPort.Core.MapData.IndexServerMapDir("/home/claude/wine/cgmsv/data/map");
+        _b = new NetworkSession(new NetworkOptions { Host = "127.0.0.1", Port = 9030, CdKey = "test2", Account = "test2", Password = "123456", ResolveMap = f => maps.TryGetValue(f, out var m) ? m.Path : null });
+        _b.Start();
     }
     public override bool _Process(double d)
     {
-        _f++;
+        _f++; _b.Poll();
         var s = _m.Session as NetworkSession;
+        if (!_bWarp && _b.InGame && _b.CurrentMap != null)
+        {
+            _bWarp = true;
+            if (_b.InParty) _b.PartyButton();
+            _b.Say("/warp 1000 0 242 101"); if ((_b.Flags & 1) == 0) _b.ToggleFlag(1);
+        }
+        // hao 进队以后 bob（队长）往南走三步（东边那格服务端走不通）
+        if (_st == 7 && _f % 40 == 20 && _bSteps < 8 && Math.Abs(_b.X - 242) + _b.Y - 101 < 3)
+        {
+            if (_bSteps > 0 && (_b.X, _b.Y) == _bLast) _bDir = (_bDir + 1) % 8;   // 上一步没走成就换方向
+            _bLast = (_b.X, _b.Y); _bSteps++; _b.Step(_bDir);
+        }
         var h = _m.HudSkin;
         switch (_st)
         {
-            case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90:
+            case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90 && _bWarp:
                 s.Say("/warp 1000 0 242 100"); _st = 1; _f = 0; break;
             case 1 when _f == 60:
                 _flags0 = s!.Flags;

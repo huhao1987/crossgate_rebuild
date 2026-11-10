@@ -31,7 +31,10 @@ public partial class Hud : CanvasLayer
     public void SetFlags(int flags) { Flags = flags; for (int i = 0; i < 5; i++) if (_lit[i] != null) _lit[i]!.Visible = (flags & FlagBits[i]) != 0; }
     private TextureRect? _menu; private GreenBox? _menuBox; private double _menuHold;
     public bool Ok { get; private set; }
-    private TextureRect? _dial;
+    private TextureRect? _skyA, _skyB;
+    private int _skyVal = -1; private double _skyAcc;
+    /// <summary>现在的 unix 秒（联网时加上服务端校时差），用来画左上角天色。</summary>
+    public System.Func<long> Now = () => System.DateTimeOffset.UtcNow.ToUnixTimeSeconds();
     private readonly List<Control> _top = new();
     /// <summary>战斗中官方只保留底栏，状态面板和右上按钮隐藏。</summary>
     public void SetBattle(bool on)
@@ -44,7 +47,6 @@ public partial class Hud : CanvasLayer
     /// <summary>左边开着窗口（状态、技能、系统、名片簿…都在左上角）时，官方把左上状态面板藏起来。</summary>
     public void SetLeftCovered(bool covered) { _leftCov = covered; if (_battle) return; foreach (var c in _top) if (c.AnchorLeft == 0) c.Visible = !covered; }
     public void SetRightCovered(bool covered) { _rightCov = covered; if (_battle) return; foreach (var c in _top) if (c.AnchorLeft == 1) c.Visible = !covered; }
-    private int _dialFrame = -1;
     private Control? _burst; private CgText? _burstTime;
     /// <summary>卡时（秒；小于 0 不显示）。</summary>
     public void SetBurst(long seconds)
@@ -95,7 +97,14 @@ public partial class Hud : CanvasLayer
             root.AddChild(tapZone);
             root.AddChild(_menu);
         }
-        // 面板左边的圆盘是时间显示（官方是按时间画的天空渐变），图档来源还没找到，暂时留空
+        // 面板左边的圆盘是天色（exe 0x414868）：天色值 0–191（CgClock.Sky），序号 = 值/48、r = 值%48，
+        // 天色图 22596+序号 画在 (27−r, 24)、下一张 22596+(序号+1)%4 画在 (75−r, 24)（图中心，图 48×40），面板盖在上面只露出圆盘那块
+        var sky = new Control { Size = new Vector2(100, 48), ClipContents = true, MouseFilter = Control.MouseFilterEnum.Ignore };
+        _skyA = new TextureRect { MouseFilter = Control.MouseFilterEnum.Ignore, TextureFilter = CanvasItem.TextureFilterEnum.Nearest };
+        _skyB = new TextureRect { MouseFilter = Control.MouseFilterEnum.Ignore, TextureFilter = CanvasItem.TextureFilterEnum.Nearest };
+        sky.AddChild(_skyA); sky.AddChild(_skyB);
+        root.AddChild(sky); _top.Add(sky);
+        UpdateSky();
         panel.Position = Vector2.Zero; root.AddChild(panel); _top.Add(panel);
         // 左上 "Burst: hh:mm"（服务端 MTg 给秒数，官方实测在状态面板下面 (1,65) 一条暗底）
         _burst = new Control { Position = new Vector2(1, 65), Size = new Vector2(98, 22), MouseFilter = Control.MouseFilterEnum.Ignore, Visible = false };
@@ -148,6 +157,7 @@ public partial class Hud : CanvasLayer
 
     public override void _Process(double delta)
     {
+        if ((_skyAcc += delta) >= 1) { _skyAcc = 0; UpdateSky(); }
         if (_menu == null) return;
         var vp = GetViewport();
         float h = vp.GetVisibleRect().Size.Y;
@@ -177,14 +187,24 @@ public partial class Hud : CanvasLayer
         return new TextureRect { Texture = tex, Size = tex.GetSize(), ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize, StretchMode = TextureRect.StretchModeEnum.Keep, MouseFilter = Control.MouseFilterEnum.Ignore, TextureFilter = CanvasItem.TextureFilterEnum.Nearest };
     }
 
-    /// <summary>时间圆盘的帧（0–8），随游戏时间变化；规律确定前由调用方传入。</summary>
-    public void SetDial(int frame)
+    /// <summary>天色值一变就换图、挪位置。</summary>
+    private void UpdateSky()
     {
-        if (_dial == null || frame == _dialFrame) return;
-        _dialFrame = frame;
-        var (tex, _) = Cache.ImageNo(22630 + frame);
-        if (tex != null) _dial.Texture = tex;
+        if (_skyA == null || _skyB == null) return;
+        int v = CgPort.Core.CgClock.Sky(Now());
+        if (v == _skyVal) return;
+        _skyVal = v;
+        int idx = v / 48, r = v % 48;
+        void Put(TextureRect t, int img, float cx)
+        {
+            var (tex, e) = Cache.ImageNo(img);
+            t.Texture = tex;
+            if (tex != null) { t.Size = tex.GetSize(); t.Position = new Vector2(cx + (e?.OffsetX ?? -24), 24 + (e?.OffsetY ?? -20)); }
+        }
+        Put(_skyA, 22596 + idx, 27 - r);
+        Put(_skyB, 22596 + (idx + 1) % 4, 75 - r);
     }
+    public int SkyValue => _skyVal;
 }
 
 /// <summary>
