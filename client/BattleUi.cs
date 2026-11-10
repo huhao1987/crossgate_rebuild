@@ -694,6 +694,20 @@ public partial class BattleUi : CanvasLayer
     /// </summary>
     private void OnRootInput(InputEvent e)
     {
+        // 鼠标停在单位上：左下提示栏显示"等级 N  名字  生命 当前/最大"（官方实拍；敌人只显示等级、名字）
+        if (e is InputEventMouseMotion mm && Visible)
+        {
+            Unit? hov = null; float hd = 40;
+            foreach (var u in _units.Values)
+            {
+                if (!u.Sprite.Visible) continue;
+                float d = (u.Sprite.Position + new Vector2(0, -30)).DistanceTo(mm.Position);
+                if (d < hd) { hd = d; hov = u; }
+            }
+            _root.TooltipText = hov == null ? "" : hov.Side == 0
+                ? $"等级 {hov.Level,3}  {Pad(hov.Name, 18)} 生命 {hov.Hp}/{hov.MaxHp}"
+                : $"等级 {hov.Level,3}  {hov.Name}";
+        }
         if (!_picking || !Visible || e is not InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } mb) return;
         // 选目标：点到离鼠标最近的敌人（以精灵脚下往上 40 像素为中心）
         Unit? best = null; float bd = 70;
@@ -969,6 +983,8 @@ public partial class BattleUi : CanvasLayer
         }
         // 魔法：原地施法
         Float(a, name, Colors.Yellow);
+        // 回复类魔法施法时，施法者身上一阵往上的光条（exe 0x46df14 = 0x1ae04 − 档位：110084…110081，官方实拍补血 LV1）
+        if (CastEffect(e0.TechId) is int cfx) PlayEffectAnime(a, cfx);
         await PlayOnce(a.Sprite, a.Sprite.HasAct(Cfg.ActMagic) ? Cfg.ActMagic : Cfg.ActAttack);
         a.Sprite.Act = Cfg.ActStand;
         var hits = new List<Task>();
@@ -988,6 +1004,8 @@ public partial class BattleUi : CanvasLayer
     private async Task Hit(Unit a, Unit t, BattleEvent e, bool heal)
     {
         if (MagicEffect(e.TechId) is int fx) PlayEffectAnime(t, fx);
+        // 物理命中：官方 0x45dc3c 按攻击者的种类挑火花，其它情况一律 110001（黄白爆点）
+        else if (!e.Magic && !heal) PlayEffectAnime(t, 110001);
         else Effect(t, e.Magic ? (heal ? new Color(0.4f, 1f, 0.5f) : new Color(1f, 0.6f, 0.2f)) : Colors.White);
         if (heal)
         {
@@ -1033,8 +1051,8 @@ public partial class BattleUi : CanvasLayer
         { 110029, 110026, 110023, 110020 },
         { 110149, 110146, 110143, 110140 },
         { 110047, 110046, 110045, 110044 },
-        { 110066, 110065, 110064, 110063 },   // 第 4 行：回复（绿光点 + 螺旋光圈）——补血 / 强力补血 / 超强补血（技能 61–63）
-        { 110070, 110069, 110068, 110067 },   // 第 5 行：同样的光圈不带光点——恢复 / 强力恢复 / 超强恢复（技能 64–66）
+        { 110088, 110087, 110086, 110085 },   // 补血 / 强力补血 / 超强补血（技能 61–63）：exe 0x4609c8 = 0x1ae08 − 档位；官方实拍补血 LV1 是这组橙色螺旋光圈
+        { 110066, 110065, 110064, 110063 },   // 恢复 / 强力恢复 / 超强恢复（技能 64–66）：特效表 0x49a838 第 4 行（同样的光圈带绿光点），按画面推的，没实拍
     };
     private static readonly byte[] LevelBucket = { 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 3, 3, 3 };
 
@@ -1049,6 +1067,16 @@ public partial class BattleUi : CanvasLayer
         if (row < 0) return null;
         int lv = n >= 16 ? n - 15 : n + 1;
         return MagicFx[row, LevelBucket[Math.Clamp(lv, 0, LevelBucket.Length - 1)]];
+    }
+
+    private static string Pad(string s, int cells) => s + new string(' ', Math.Max(0, cells - s.Sum(CgText.Cells)));
+
+    public static int? CastEffect(int techId)
+    {
+        int skill = techId / 100, n = techId % 100;
+        if (skill is < 61 or > 66) return null;
+        int lv = n >= 16 ? n - 15 : n + 1;
+        return 110084 - LevelBucket[Math.Clamp(lv, 0, LevelBucket.Length - 1)];
     }
 
     public int EffectsPlayed { get; private set; }
@@ -1104,6 +1132,7 @@ public partial class BattleUi : CanvasLayer
             t.Hp = Math.Max(0, t.Hp - e.Damage);
             Float(t, e.Damage.ToString(), t.Side == 0 ? new Color(1f, 0.55f, 0.4f) : Colors.White);
             Flash(t.Sprite);
+            PlayEffectAnime(t, 110001);   // 命中火花（官方 0x45dc3c 默认 110001）
             var hurt = PlayOnce(t.Sprite, Cfg.ActHurt);
             var knock = (t.Home - a.Home).Normalized() * 14;
             var tw = t.Sprite.CreateTween().SetSpeedScale(Speed);

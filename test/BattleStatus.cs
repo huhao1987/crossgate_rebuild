@@ -34,7 +34,7 @@ public partial class BattleStatus : SceneTree
                 _st = 1; _f = 0; break;
             }
             case 1 when _f == 60:
-                Check(BattleUi.MagicEffect(6100) == 110066 && BattleUi.MagicEffect(6109) == 110063 && BattleUi.MagicEffect(6400) == 110070 && BattleUi.MagicEffect(1900) == 110041,
+                Check(BattleUi.MagicEffect(6100) == 110088 && BattleUi.MagicEffect(6109) == 110085 && BattleUi.MagicEffect(6400) == 110066 && BattleUi.CastEffect(6100) == 110084 && BattleUi.MagicEffect(1900) == 110041,
                     $"魔法特效编号：补血1 {BattleUi.MagicEffect(6100)}、补血10 {BattleUi.MagicEffect(6109)}、恢复1 {BattleUi.MagicEffect(6400)}、陨石1 {BattleUi.MagicEffect(1900)}");
                 Check(_m.Battle.StatusOverlays == 7, $"状态动画：{_m.Battle.StatusOverlays} 个（5 个异常 + 2 个魔法状态）");
                 Root.GetTexture().GetImage().SavePng("res://test/out_battle_status.png");
