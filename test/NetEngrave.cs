@@ -31,7 +31,7 @@ public partial class NetEngrave : SceneTree
         switch (_st)
         {
             case 0 when s?.InGame == true && s.CurrentMap != null && _f > 90:
-                foreach (var c in new[] { "/dolua gm_kakuin.lua", "/dolua gm_heal.lua", "/giveItem 20016 1 1 1" }) s.Say(c);
+                foreach (var c in new[] { "/dolua gm_kakuin.lua", "/dolua gm_heal.lua", "/giveItem 0 1 1 1" }) s.Say(c);
                 _st = 1; _f = 0; break;
             case 1 when _f > 90 && Sk(s!) is { Techs.Count: > 0 } && Sword(s!) != null:
             {

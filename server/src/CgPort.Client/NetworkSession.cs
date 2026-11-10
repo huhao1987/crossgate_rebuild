@@ -2194,7 +2194,7 @@ public sealed class NetworkSession : IGameSession
             // 交出物品（exe 0x420dcf 读、0x42a7d0 画）：头像|NPC名|?|话，选项「 交出物品 」「  取  消  」，同交易入口：交出发 "0"，取消只关
             var q = string.Join(' ', f.Skip(4)).Split('|');
             string T(int i) => i < q.Length ? Unesc(q[i]).Replace("\\n", "\n").Trim('\n') : "";
-            page = new DialogPage(T(3), new List<string>(), false, new List<string> { "交出物品", "取消" })
+            page = new DialogPage(T(3).Trim(), new List<string>(), false, new List<string> { "交出物品", "取消" })
             { Kind = "givemenu", NpcName = T(1), Face = int.TryParse(q[0], out var fc) ? fc : 0 };
             DialogChanged?.Invoke(page);
             return;

@@ -62,6 +62,12 @@ public partial class NetAudio : SceneTree
             case 6 when s!.PetTurn && !b.Busy && _f % 40 == 22 && b.AttackAnimsShown == 0:
                 { var en = s.CurrentBattle.Units.FirstOrDefault(u => u.Side == 1 && u.Alive); if (en != null) b.TestPickTarget(en.Id); }
                 break;
+            // 宠物没上场时人物有第二次行动（指令2）：也普攻
+            case 6 when !s!.PetTurn && s.CommandSlot == 1 && !b.Busy && _f % 40 == 11 && b.AttackAnimsShown == 0:
+                b.TestPressAttack(); break;
+            case 6 when !s!.PetTurn && s.CommandSlot == 1 && !b.Busy && _f % 40 == 22 && b.AttackAnimsShown == 0:
+                { var en = s.CurrentBattle.Units.FirstOrDefault(u => u.Side == 1 && u.Alive); if (en != null) b.TestPickTarget(en.Id); }
+                break;
             case 6 when b.AttackAnimsShown > 0 && _f > 200 || _f == 1500:
                 Check(a!.PlayedSe.Count > 0, $"（事件 {b.PlayedEvents}，攻击动作 {b.AttackAnimsShown}）攻击动画放了音效：{string.Join(",", a.PlayedSe.Distinct())}（文件 {string.Join(",", a.PlayedSe.Distinct().Select(i => SeTable.All.GetValueOrDefault(i).File))}）");
                 _st = 7; _f = 0; break;

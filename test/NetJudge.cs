@@ -9,7 +9,7 @@ namespace CgPort.Godot.Tests;
 /// </summary>
 public partial class NetJudge : SceneTree
 {
-    int _f, _st; long _gold0; Main _m = null!; CgPort.Server.DialogPage? _page; bool _hook;
+    int _f, _st, _rep0; long _gold0; Main _m = null!; CgPort.Server.DialogPage? _page; bool _hook;
     readonly List<string> _r = new();
     void Check(bool ok, string n) { _r.Add((ok ? "PASS " : "FAIL ") + n); GD.Print((ok ? "PASS " : "FAIL ") + n); }
     void Shot(string n) => Root.GetTexture().GetImage().SavePng($"res://test/out_judge_{n}.png");
@@ -27,7 +27,7 @@ public partial class NetJudge : SceneTree
         var n = s.NpcsOnCurrentMap().FirstOrDefault(k => k.Name == name);
         if (n != null) { _page = null; _m.TalkOrApproach(n); }
     }
-    static string Swords(NetworkSession s) => string.Join(",", s.Player.Items.Where(i => i.Slot is 24 or 25).Select(i => i.Name));
+    static string Swords(NetworkSession s) => string.Join(",", s.Player.Items.Where(i => i.Slot >= 8 && (i.Name == "单手剑？" || i.Name == "铜剑")).Select(i => i.Name));
     public override bool _Process(double d)
     {
         _f++;
@@ -60,7 +60,7 @@ public partial class NetJudge : SceneTree
             {
                 var l = w.Page!.Shop!;
                 Check(w.Visible && l.Count >= 1, $"修理窗口：{string.Join("、", l.Select(e => $"{e.Name} {e.Price}G 格{e.Slot}"))}");
-                _gold0 = s!.Player.Gold; w.Add(0, 1); Shot("3_repair"); w.Ok(); _st = 7; _f = 0; break;
+                _gold0 = s!.Player.Gold; _rep0 = l.Count; w.Add(0, 1); Shot("3_repair"); w.Ok(); _st = 7; _f = 0; break;
             }
             case 6 when _f > 600: Check(false, $"修理窗口没出来（{_page?.Kind}）"); return End();
             case 7 when _f == 20:
@@ -69,7 +69,7 @@ public partial class NetJudge : SceneTree
                 Check(s!.Player.Gold < _gold0, $"修理：金钱 {_gold0} → {s.Player.Gold}");
                 Talk(s, "米克尔"); _st = 9; _f = 0; break;
             case 9 when _f == 150:
-                Check(_page?.Kind == "repair" && w.Page!.Shop!.Count == 1, $"修好的那把不再列出：{w.Page?.Shop?.Count} 件");
+                Check(_page?.Kind == "repair" && w.Page!.Shop!.Count == _rep0 - 1, $"修好的那把不再列出：{_rep0} → {w.Page?.Shop?.Count} 件");
                 w.Cancel(); Check(!w.Visible, "取消 → 关掉"); return End();
             case 99 when _f == 90: GD.Print(string.Join("\n", _r)); File.Delete(ProjectSettings.GlobalizePath("user://config.json")); return true;
         }
