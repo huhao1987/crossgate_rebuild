@@ -54,6 +54,7 @@ public partial class NetSkill : SceneTree
             case 7 when _f == 10:
                 b.TestPickTarget(s!.CurrentBattle.Units.First(u => u.Side == 1 && u.Alive).Id); _st = 8; _f = 0; break;
             case 8 when !_mid && b.SkillsPlayed > 0: _mid = true; _midF = _f; Shot("4_cast"); break;
+            case 8 when _mid && _midF > 0 && _f == _midF + 16: Shot("4b_fly"); break;
             case 8 when _mid && _midF > 0 && _f == _midF + 50: Shot("5_fx"); break;
             case 8 when _f == 360:
                 Check(b.SkillsPlayed > 0, $"技能动画播了 {b.SkillsPlayed} 组（事件 {b.PlayedEvents}）");

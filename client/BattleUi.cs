@@ -957,6 +957,49 @@ public partial class BattleUi : CanvasLayer
         card?.QueueFree();
     }
 
+    /// <summary>
+    /// 气功弹（技能 4）：施法者原地，身上先放 110008（往外散的细光线，官方实拍），
+    /// 然后一颗气功弹 110016 从施法者身体 1/3 高处飞向目标（exe 0x466810 建对象、每帧处理 0x45e7a0：高度取图高 /3，距离 ≤ 40 算打中、音效 255），
+    /// 打中 → 命中火花 + 伤害；球留在目标身上直到挨打动作做完，再 30 帧淡出（exe 状态 5：透明度 (30−n)×255/30）。
+    /// 飞行速度按官方实拍估：约每帧 11 像素（60 帧/秒）。
+    /// </summary>
+    private async Task PlayChiBall(Unit a, List<BattleEvent> group, string name)
+    {
+        Float(a, name, Colors.Yellow);
+        PlayEffectAnime(a, 110008);
+        await Wait(0.35);
+        int total = 0;
+        foreach (var e in group)
+        {
+            if (!_units.TryGetValue(e.TargetId, out var t)) continue;
+            var acts = Cache.Library.AnimeActions(110016);
+            AnimSprite? ball = null;
+            Vector2 Lift(Unit u) => new(0, -(u.Sprite.Texture?.GetHeight() ?? 60) * u.Sprite.Scale.Y / 3f);
+            if (acts.Count > 0)
+            {
+                var k = acts.Keys.OrderBy(x => x.Act).ThenBy(x => x.Dir).First();
+                ball = new AnimSprite { Cache = Cache, AnimeId = 110016, Dir = k.Dir, Act = k.Act, FallbackAct = k.Act, Position = a.Sprite.Position + Lift(a), Scale = a.Sprite.Scale, ZIndex = 9 };
+                _stage.AddChild(ball);
+                var to = t.Sprite.Position + Lift(t);
+                while (ball.Position.DistanceTo(to) > 40)
+                {
+                    float f = await Frames();
+                    ball.Position = ball.Position.MoveToward(to, 11f * f * a.Sprite.Scale.X);
+                }
+                ball.Position = to;
+            }
+            GameAudio.Se(255);
+            if (e.Missed) Float(t, "Miss", Colors.LightGray);
+            else { total += e.Damage; await Hit(a, t, e, heal: false); }
+            if (ball != null)
+            {
+                for (float n = 0; n < 30; n += await Frames()) ball.Modulate = new Color(1, 1, 1, (30 - n) / 30f);
+                ball.QueueFree();
+            }
+        }
+        Say($"{Name(a.Id)} 使用 {name}，{total} 点伤害" + (group.Any(e => e.Killed) ? "，击倒！" : ""));
+    }
+
     /// <summary>等一帧，返回这一帧折合官方多少帧（60 帧/秒，乘播放速度）。</summary>
     private async Task<float> Frames()
     {
@@ -989,6 +1032,11 @@ public partial class BattleUi : CanvasLayer
         var e0 = group[0];
         if (!_units.TryGetValue(e0.ActorId, out var a)) return;
         string name = TechName(e0.TechId);
+        if (!e0.Magic && e0.TechId / 100 == 4)
+        {
+            await PlayChiBall(a, group, name);
+            return;
+        }
         if (!e0.Magic)
         {
             if (!_units.TryGetValue(e0.TargetId, out var t0)) return;
